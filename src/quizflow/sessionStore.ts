@@ -207,7 +207,19 @@ export function mergeGameStates(current: GameState | null, incoming: GameState |
     if (!p1 && p2) {
       mergedPlayers[pid] = { ...p2 }
     } else if (p1 && !p2) {
-      mergedPlayers[pid] = { ...p1 }
+      // Player exists locally but is absent from lightweight payload (e.g. not in top-10 broadcast).
+      // Still reset per-question answer flags on question advancement so they can answer the new question.
+      if (isRoundAdvancement || isQuestionAdvancement) {
+        mergedPlayers[pid] = {
+          ...p1,
+          hasAnswered: false,
+          selectedIndex: null,
+          lastAnswerCorrect: null,
+          lastPointsEarned: 0
+        }
+      } else {
+        mergedPlayers[pid] = { ...p1 }
+      }
     } else if (p1 && p2) {
       const score = Math.max(p1.score || 0, p2.score || 0)
       const maxStreak = Math.max(p1.maxStreak || 0, p2.maxStreak || 0, p1.streak || 0, p2.streak || 0)
@@ -557,10 +569,23 @@ export function saveState(state: GameState, opts?: { relay?: boolean; immediate?
       const current = loadState(state.pin)
       const merged = mergeGameStates(current, state) || state
       _memState[state.pin] = merged
-      // No observable change → skip the localStorage write and relay round-trip.
-      // Polling/merging an identical state is the common case, so this removes
-      // the 2.5Hz full-state writes and redundant POSTs during idle polling.
-      const sig = JSON.stringify(merged)
+
+      // Security: strip correct_index from quiz questions before writing to localStorage
+      // during question_active / boss_frenzy — prevents DevTools answer leakage.
+      // Correct answers are restored to state from the server on question_reveal / ended.
+      const isActive = merged.status === 'question_active' || merged.status === 'boss_frenzy'
+      const storageState = isActive && merged.quiz?.questions ? {
+        ...merged,
+        quiz: {
+          ...merged.quiz,
+          questions: merged.quiz.questions.map((q: any) => {
+            const { correct_index, ...safeQ } = q
+            return safeQ
+          })
+        }
+      } : merged
+
+      const sig = JSON.stringify(storageState)
       if (sig === _sigByPin[state.pin]) {
         _memState[state.pin] = _servedByPin[state.pin] || merged
         return _memState[state.pin]
@@ -749,19 +774,22 @@ export function subscribeToSession(
   }
   window.addEventListener('storage', onStorage)
 
-  // 5. Cloud Room Relay Polling for cross-device internet sync.
+  // 5. Cloud Room Relay Polling — now a slow 3s failsafe only.
+  // Supabase Realtime WebSockets deliver all real-time updates in <15ms.
+  // Polling at 400ms was generating ~375 HTTP GET requests/sec with 150 players,
+  // overloading Vercel serverless and causing 5-15s cold-start delays.
   let lastPollAt = 0
   const poll = () => {
     if (typeof document !== 'undefined' && document.hidden) return
     const now = Date.now()
-    const minInterval = 350 // Fast 350ms polling across all phases for instant sync
+    const minInterval = 3000 // 3s fallback — WebSocket handles real-time
     if (now - lastPollAt < minInterval) return
     lastPollAt = now
     fetchRemoteState(pin).then(remote => {
       if (remote) notify(remote)
     })
   }
-  const pollInterval = setInterval(poll, 400)
+  const pollInterval = setInterval(poll, 3000)
   const onVisible = () => { if (!document.hidden) poll() }
   document.addEventListener('visibilitychange', onVisible)
 
@@ -1614,7 +1642,8 @@ export function submitAnswer(pin: string, playerId: string, selectedIndex: numbe
         playerId,
         selectedIndex,
         powerUpActive,
-        timeRemainingMs,
+        // Omit timeRemainingMs: server computes from questionEndsAt (server clock) for fairness.
+        // Device clocks can drift ±5s on cheap Androids causing unfair speed scoring.
         responseTimeMs
       })
     }).catch(() => {})

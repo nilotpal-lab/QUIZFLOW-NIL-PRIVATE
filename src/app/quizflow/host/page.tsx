@@ -72,7 +72,7 @@ function TeacherHostDashboard() {
     if (!pin) return
     const t = setTimeout(() => {
       if (!gameState) setSessionTimeout(true)
-    }, 6000)
+    }, 12000) // 12s: Supabase WebSocket + cold-start can take >6s on slow networks
     return () => clearTimeout(t)
   }, [pin, gameState])
 
@@ -171,14 +171,17 @@ function TeacherHostDashboard() {
   }, [gameState?.status, gameState?.currentQuestionIndex, gameState?.questionEndsAt, gameState?.isPaused, gameState?.pausedTimeRemainingMs, pin, revealedIndex])
 
   // Auto-reveal when ALL joined players have answered (minimum 3s after start)
+  const autoRevealFiredRef = useRef<Record<number, boolean>>({})
   useEffect(() => {
     if (!gameState || gameState.status !== 'question_active') return
     const playersList = Object.values(gameState.players || {})
     const elapsed = Date.now() - (gameState.questionStartedAt || 0)
     const allAnswered = playersList.length > 0 && playersList.every(p => p.hasAnswered)
-    if (playersList.length > 0 && elapsed >= 3000 && allAnswered) {
-      if (revealedIndex !== gameState.currentQuestionIndex) {
-        setRevealedIndex(gameState.currentQuestionIndex)
+    const qIdx = gameState.currentQuestionIndex ?? 0
+    if (playersList.length > 0 && elapsed >= 3000 && allAnswered && !autoRevealFiredRef.current[qIdx]) {
+      if (revealedIndex !== qIdx) {
+        autoRevealFiredRef.current[qIdx] = true  // fire at most once per question
+        setRevealedIndex(qIdx)
         revealAnswer(pin)
       }
     }

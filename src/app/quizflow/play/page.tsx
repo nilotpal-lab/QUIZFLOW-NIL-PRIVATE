@@ -189,7 +189,7 @@ function StudentPlayScreen() {
           }
         })
       }
-    }, 7000)
+    }, 12000) // 12s: matches host timeout; WebSocket + cold-start can take >6s on slow mobile
     return () => clearTimeout(t)
   }, [pin, playerId, gameState, nickname, avatarSeed, avatarStyle, router])
 
@@ -392,14 +392,19 @@ function StudentPlayScreen() {
 
     if (q) {
       const isCorrect = idx === q.correct_index
-      const result = calculatePoints(timeMs, totalTime, isCorrect, me?.streak || 0, doubleActive)
-      setPopupPoints(result.points)
+      const bidMult = me?.bidMultiplier ?? 1
+      const result = calculatePoints(timeMs, totalTime, isCorrect, me?.streak || 0, doubleActive || bidMult > 1)
+      // Scale raw points by bid multiplier to match server-authoritative score shown in popup
+      const displayPoints = bidMult > 1 && !doubleActive ? Math.min(12000, Math.round(result.points * bidMult)) : result.points
+      setPopupPoints(displayPoints)
       setShowPopup(true)
     }
     submitAnswer(pin, playerId, idx, doubleActive)
   }, [gameState, me, q, timeMs, totalTime, doubleActive, pin, playerId])
 
   const usePowerUp = (type: PowerUpType) => {
+    // Guard: power-ups only valid during active unanswered question
+    if (isRevealed || hasAnswered) return
     if (usedPowers.has(type)) return
     setUsedPowers(prev => {
       const next = new Set<PowerUpType>()
@@ -412,7 +417,7 @@ function StudentPlayScreen() {
       try { window.navigator.vibrate([25, 40, 50]) } catch {}
     }
 
-    if (type === 'fifty_fifty' && q) {
+    if (type === 'fifty_fifty' && q && q.correct_index !== undefined) {
       playPowerUpSound('5050')
       const wrong = q.choices.map((_, i) => i).filter(i => i !== q.correct_index)
       setHiddenChoices(new Set(wrong.sort(() => Math.random() - 0.5).slice(0, Math.min(2, wrong.length))))
@@ -701,7 +706,9 @@ function StudentPlayScreen() {
           position: 'fixed', inset: 0, zIndex: 200,
           background: 'rgba(10,10,11,0.92)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          backdropFilter: 'blur(8px)'
+          backdropFilter: 'blur(8px)',
+          pointerEvents: 'all',  // Block ALL touch/click events from reaching answer buttons underneath
+          touchAction: 'none'
         }}>
           <div className="card anim-scale-in" style={{ maxWidth: 380, padding: '36px 28px', textAlign: 'center' }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>⛶</div>
