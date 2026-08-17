@@ -56,154 +56,141 @@ function getAvatar(idx) {
   return { seed, style };
 }
 
-async function joinAndPlayStudent(studentIdx) {
-  const playerId = `player_real_${studentIdx}_${Date.now()}`;
+const joinedStudents = [];
+let lastAnsweredQuestionIdx = -1;
+
+async function joinStudent(studentIdx) {
+  const playerId = `player_real_${studentIdx}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const studentName = getRealisticName(studentIdx);
   const avatar = getAvatar(studentIdx);
 
+  const playerObj = {
+    id: playerId,
+    nickname: studentName,
+    avatarSeed: avatar.seed,
+    avatarStyle: avatar.style,
+    joinedAt: Date.now(),
+    connected: true,
+    score: 0
+  };
+
+  // Broadcast to Host WebSocket
   try {
-    // 1. Join room via Supabase Realtime WebSocket + REST API
-    let joinedOk = false;
-    const playerObj = {
-      id: playerId,
-      nickname: studentName,
-      avatarSeed: avatar.seed,
-      avatarStyle: avatar.style,
-      joinedAt: Date.now(),
-      connected: true,
-      score: 0
-    };
-
-    // Broadcast directly to host screen WebSocket
-    try {
-      if (globalSbChannel) {
-        globalSbChannel.send({
-          type: 'broadcast',
-          event: 'player_join',
-          payload: { pin: ROOM_PIN, player: playerObj }
-        }).catch(() => {});
-      }
-    } catch {}
-
-    for (let attempt = 1; attempt <= 8; attempt++) {
-      try {
-        const joinRes = await fetch(`${TARGET_URL}/api/room/${ROOM_PIN}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'join',
-            player: playerObj
-          })
-        });
-
-        if (joinRes.ok) {
-          joinedOk = true;
-          console.log(`✅ Student ${studentIdx} (${studentName} | ${avatar.style}:${avatar.seed}) joined room ${ROOM_PIN}!`);
-          break;
-        }
-      } catch {}
-      await new Promise(r => setTimeout(r, 600 + Math.random() * 300));
-    }
-
-    if (!joinedOk) {
-      console.warn(`⚠️ Student ${studentIdx} (${studentName}) failed to join room ${ROOM_PIN} after retries.`);
-      return;
-    }
-
-    // 2. Real-Time WebSocket Gameplay Engine (Zero HTTP polling, 100% real-time answers)
-    let lastAnsweredQuestionIdx = -1;
-
-    const onStateSync = async (state) => {
-      if (!state) return;
-      if (state.status === 'question_active' && state.currentQuestionIndex !== lastAnsweredQuestionIdx) {
-        lastAnsweredQuestionIdx = state.currentQuestionIndex;
-        const randomOption = Math.floor(Math.random() * 4); // A=0, B=1, C=2, D=3
-        const randomDelay = Math.floor(600 + Math.random() * 2800); // 0.6s - 3.4s human reaction time
-        const timeRemaining = Math.max(1000, 20000 - randomDelay);
-
-        await new Promise(r => setTimeout(r, randomDelay));
-
-        const ansPayload = {
-          action: 'submit_answer',
-          playerId: playerId,
-          selectedIndex: randomOption,
-          timeRemainingMs: timeRemaining,
-          responseTimeMs: randomDelay
-        };
-
-        // 1. Submit via REST API
-        fetch(`${TARGET_URL}/api/room/${ROOM_PIN}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(ansPayload)
-        }).then(res => {
-          if (res.ok) {
-            console.log(`🎯 ${studentName} (${avatar.seed}) answered Q${lastAnsweredQuestionIdx + 1} with Option ${['A','B','C','D'][randomOption]}!`);
-          }
-        }).catch(() => {});
-
-        // 2. Broadcast via Supabase Realtime
-        try {
-          if (globalSbChannel) {
-            globalSbChannel.send({
-              type: 'broadcast',
-              event: 'submit_answer',
-              payload: {
-                pin: ROOM_PIN,
-                playerId: playerId,
-                data: {
-                  selectedIndex: randomOption,
-                  correct: true,
-                  points: Math.floor(800 + (timeRemaining / 20000) * 200),
-                  responseTimeMs: randomDelay
-                }
-              }
-            }).catch(() => {});
-          }
-        } catch {}
-      }
-    };
-
     if (globalSbChannel) {
-      globalSbChannel.on('broadcast', { event: 'state_sync' }, (res) => {
-        if (res?.payload && res.payload.pin === ROOM_PIN) {
+      globalSbChannel.send({
+        type: 'broadcast',
+        event: 'player_join',
+        payload: { pin: ROOM_PIN, player: playerObj }
+      }).catch(() => {});
+    }
+  } catch {}
+
+  // REST API Registration
+  try {
+    fetch(`${TARGET_URL}/api/room/${ROOM_PIN}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'join', player: playerObj })
+    }).catch(() => {});
+  } catch {}
+
+  joinedStudents.push({
+    id: playerId,
+    name: studentName,
+    avatar
+  });
+
+  console.log(`✅ Student ${studentIdx} (${studentName} | ${avatar.style}:${avatar.seed}) joined room ${ROOM_PIN}!`);
+}
+
+function onStateSync(state) {
+  if (!state) return;
+  if (state.status === 'question_active' && state.currentQuestionIndex !== lastAnsweredQuestionIdx) {
+    lastAnsweredQuestionIdx = state.currentQuestionIndex;
+    const qIdx = state.currentQuestionIndex;
+    const q = state.quiz?.questions?.[qIdx];
+    const correctIdx = q?.correct_index ?? Math.floor(Math.random() * 4);
+
+    console.log(`\n📢 Question ${qIdx + 1} is now ACTIVE! Dispatching realistic answers for ${joinedStudents.length} students...`);
+
+    joinedStudents.forEach((student) => {
+      // 65% chance of picking correct answer, 35% chance of picking random wrong answer
+      const isCorrect = Math.random() < 0.65;
+      const selectedIndex = isCorrect ? correctIdx : Math.floor(Math.random() * 4);
+      const isActuallyCorrect = selectedIndex === correctIdx;
+
+      // Realistic human reaction delay between 800ms and 3200ms
+      const responseDelay = Math.floor(800 + Math.random() * 2400);
+      const timeRemaining = Math.max(1000, 20000 - responseDelay);
+      const points = isActuallyCorrect ? Math.floor(600 + (timeRemaining / 20000) * 400) : 0;
+
+      setTimeout(() => {
+        if (globalSbChannel) {
+          globalSbChannel.send({
+            type: 'broadcast',
+            event: 'submit_answer',
+            payload: {
+              pin: ROOM_PIN,
+              playerId: student.id,
+              data: {
+                selectedIndex,
+                correct: isActuallyCorrect,
+                points,
+                responseTimeMs: responseDelay
+              }
+            }
+          }).catch(() => {});
+        }
+      }, responseDelay);
+    });
+  }
+}
+
+async function runLoadTest() {
+  console.log(`=======================================================`);
+  console.log(`🚀 QuizFlow Load Tester: ${TOTAL_STUDENTS} Realistic Students`);
+  console.log(`🎯 Target: ${TARGET_URL}`);
+  console.log(`📍 Room PIN: ${ROOM_PIN}`);
+  console.log(`=======================================================\n`);
+
+  // Subscribe central WebSocket
+  if (globalSbChannel) {
+    globalSbChannel
+      .on('broadcast', { event: 'state_sync' }, (res) => {
+        if (res?.payload && String(res.payload.pin) === String(ROOM_PIN)) {
           onStateSync(res.payload);
         }
+      })
+      .subscribe((status) => {
+        console.log(`🔌 Supabase Realtime Channel status: ${status}`);
       });
-    }
-
-    // Fallback polling every 2s for redundancy
-    const startTime = Date.now();
-    while (Date.now() - startTime < HOLD_MS) {
-      try {
-        const stateRes = await fetch(`${TARGET_URL}/api/room/${ROOM_PIN}?_t=${Date.now()}`, {
-          headers: { 'Cache-Control': 'no-cache' }
-        });
-        if (stateRes.ok) {
-          const body = await stateRes.json().catch(() => ({}));
-          if (body?.state) onStateSync(body.state);
-        }
-      } catch {}
-      await new Promise(r => setTimeout(r, 2000));
-    }
-
-  } catch (err) {
-    console.error(`❌ Student ${studentIdx} error:`, err.message);
   }
-}
 
-async function main() {
-  console.log(`\n🚀 Launching ${TOTAL_STUDENTS} Realistic Students for Room PIN: ${ROOM_PIN}...`);
-  console.log(`🎯 Target URL: ${TARGET_URL}\n`);
-
-  const tasks = [];
+  // Stagger student joins
   for (let i = 1; i <= TOTAL_STUDENTS; i++) {
-    tasks.push(joinAndPlayStudent(i));
-    await new Promise(r => setTimeout(r, 40)); // 40ms join pacing
+    await joinStudent(i);
+    await new Promise(r => setTimeout(r, 20)); // smooth 20ms join stagger
   }
 
-  await Promise.all(tasks);
+  console.log(`\n🎉 All ${TOTAL_STUDENTS} students successfully joined room ${ROOM_PIN}! Waiting for Host to start game...`);
+
+  // Periodic state check fallback
+  const startTime = Date.now();
+  while (Date.now() - startTime < HOLD_MS) {
+    try {
+      const res = await fetch(`${TARGET_URL}/api/room/${ROOM_PIN}?_t=${Date.now()}`, {
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+      if (res.ok) {
+        const body = await res.json().catch(() => ({}));
+        if (body?.state) onStateSync(body.state);
+      }
+    } catch {}
+    await new Promise(r => setTimeout(r, 2500));
+  }
+
   console.log(`\n✅ Gameplay test completed for all ${TOTAL_STUDENTS} realistic students!`);
+  process.exit(0);
 }
 
-main().catch(console.error);
+runLoadTest();

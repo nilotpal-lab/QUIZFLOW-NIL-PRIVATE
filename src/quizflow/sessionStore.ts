@@ -42,6 +42,7 @@ export interface Player {
   lastAnswerCorrect: boolean | null
   lastPointsEarned: number
   hasAnswered: boolean
+  lastAnsweredQIdx?: number
   selectedIndex: number | null
   joinedAt: number
   connected: boolean
@@ -638,6 +639,35 @@ export function deleteState(pin: string) {
   broadcast(pin)
 }
 
+// ── Batched Player Answer Throttling (Throttles 400+ student writes to 150ms batches) ─
+const _batchedAnswers: Record<string, { timer: ReturnType<typeof setTimeout> | null; players: Record<string, Player> }> = {}
+
+export function queueBatchedPlayerAnswer(pin: string, player: Player) {
+  if (!_batchedAnswers[pin]) {
+    _batchedAnswers[pin] = { timer: null, players: {} }
+  }
+  _batchedAnswers[pin].players[player.id] = player
+
+  if (!_batchedAnswers[pin].timer) {
+    _batchedAnswers[pin].timer = setTimeout(() => {
+      const entry = _batchedAnswers[pin]
+      if (!entry) return
+      delete _batchedAnswers[pin]
+
+      const current = loadState(pin)
+      if (current) {
+        saveState({
+          ...current,
+          players: {
+            ...current.players,
+            ...entry.players
+          }
+        })
+      }
+    }, 150)
+  }
+}
+
 // ── Subscribe to changes ──────────────────────────────────────────
 export function subscribeToSession(
   pin: string,
@@ -781,32 +811,35 @@ export function subscribeToSession(
         .on('broadcast', { event: 'submit_answer' }, (res: any) => {
           if (res?.payload?.playerId && res?.payload?.pin === pin) {
             const current = loadState(pin)
-            if (current && current.players?.[res.payload.playerId]) {
-              const p = current.players[res.payload.playerId]
-              const data = res.payload.data || {}
-              const isCorrect = data.correct !== undefined ? Boolean(data.correct) : false
-              const points = data.points || 0
-              const updatedPlayer = {
-                ...p,
-                hasAnswered: true,
-                selectedIndex: data.selectedIndex !== undefined ? data.selectedIndex : p.selectedIndex,
-                lastAnswerCorrect: isCorrect,
-                score: (p.score || 0) + points,
-                lastPointsEarned: points,
-                totalAnswered: (p.totalAnswered || 0) + 1,
-                totalCorrect: (p.totalCorrect || 0) + (isCorrect ? 1 : 0),
-                totalResponseTimeMs: (p.totalResponseTimeMs || 0) + (data.responseTimeMs || 0),
-                streak: isCorrect ? (p.streak || 0) + 1 : 0,
-                maxStreak: isCorrect ? Math.max(p.maxStreak || 0, (p.streak || 0) + 1) : (p.maxStreak || 0)
-              }
-              saveState({
-                ...current,
-                players: {
-                  ...current.players,
-                  [res.payload.playerId]: updatedPlayer
-                }
-              })
+            if (!current || !current.players?.[res.payload.playerId]) return
+            const p = current.players[res.payload.playerId]
+
+            // CRITICAL DUPLICATE SCORING GUARD:
+            // Never award points more than ONCE per question index!
+            const qIdx = current.currentQuestionIndex ?? 0
+            if (p.hasAnswered || p.lastAnsweredQIdx === qIdx) {
+              return
             }
+
+            const data = res.payload.data || {}
+            const isCorrect = data.correct !== undefined ? Boolean(data.correct) : false
+            const points = Math.min(1000, Math.max(0, Number(data.points) || 0))
+            const updatedPlayer: Player = {
+              ...p,
+              hasAnswered: true,
+              lastAnsweredQIdx: qIdx,
+              selectedIndex: data.selectedIndex !== undefined ? data.selectedIndex : p.selectedIndex,
+              lastAnswerCorrect: isCorrect,
+              score: (p.score || 0) + points,
+              lastPointsEarned: points,
+              totalAnswered: (p.totalAnswered || 0) + 1,
+              totalCorrect: (p.totalCorrect || 0) + (isCorrect ? 1 : 0),
+              totalResponseTimeMs: (p.totalResponseTimeMs || 0) + (Number(data.responseTimeMs) || 0),
+              streak: isCorrect ? (p.streak || 0) + 1 : 0,
+              maxStreak: isCorrect ? Math.max(p.maxStreak || 0, (p.streak || 0) + 1) : (p.maxStreak || 0)
+            }
+
+            queueBatchedPlayerAnswer(pin, updatedPlayer)
           }
         })
         .on('broadcast', { event: 'request_state' }, () => {
@@ -964,7 +997,14 @@ export function startGame(pin: string) {
     phaseEpoch: now,
     revealCorrectIndex: null,
     players: Object.fromEntries(
-      Object.entries(state.players || {}).map(([id, p]) => [id, { ...p, hasAnswered: false, selectedIndex: null, lastAnswerCorrect: null, lastPointsEarned: 0 }])
+      Object.entries(state.players || {}).map(([id, p]) => [id, {
+        ...p,
+        hasAnswered: false,
+        lastAnsweredQIdx: undefined,
+        selectedIndex: null,
+        lastAnswerCorrect: null,
+        lastPointsEarned: 0
+      }])
     )
   }, { immediate: true })
 }
@@ -1024,8 +1064,12 @@ export function nextQuestion(pin: string) {
   const now = Date.now()
   const resetPlayers = Object.fromEntries(
     Object.entries(state.players || {}).map(([id, p]) => [id, {
-      ...p, hasAnswered: false, selectedIndex: null,
-      lastAnswerCorrect: null, lastPointsEarned: 0
+      ...p,
+      hasAnswered: false,
+      lastAnsweredQIdx: undefined,
+      selectedIndex: null,
+      lastAnswerCorrect: null,
+      lastPointsEarned: 0
     }])
   )
   saveState({
