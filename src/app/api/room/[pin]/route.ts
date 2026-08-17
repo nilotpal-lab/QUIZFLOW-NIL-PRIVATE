@@ -114,7 +114,7 @@ function debouncedSupabaseUpsert(pin: string, state: any, forceImmediate = false
 async function performSupabaseWrite(pin: string, current: any): Promise<void> {
   if (!supabase || !current) return
   try {
-    const upsertPromise = supabase.from('quizzes').upsert({
+    const { error } = await supabase.from('quizzes').upsert({
       id: 'room_' + pin,
       host_id: current.hostId || 'host_live',
       title: current.quiz?.title || 'Live Room ' + pin,
@@ -124,8 +124,7 @@ async function performSupabaseWrite(pin: string, current: any): Promise<void> {
       is_draft: false,
       updated_at: new Date().toISOString()
     })
-    const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 800))
-    await Promise.race([upsertPromise, timeoutPromise])
+    if (error) console.warn(`[Supabase Upsert Error] room_${pin}:`, error.message)
   } catch (err) {
     console.warn(`[QuizFlow Relay] Supabase write failed for room ${pin}:`, err)
   }
