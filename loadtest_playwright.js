@@ -7,7 +7,7 @@
 const TARGET_URL = process.env.TARGET_URL || 'http://localhost:3001';
 const ROOM_PIN   = process.env.PIN || '971047';
 const TOTAL_STUDENTS = parseInt(process.env.STUDENTS || '600', 10);
-const HOLD_MS    = parseInt(process.env.HOLD_MS || '300000', 10); // 5 minutes
+const HOLD_MS    = parseInt(process.env.HOLD_MS || '1800000', 10); // 30 minutes for complete multi-question tournament
 
 let globalSbChannel = null;
 try {

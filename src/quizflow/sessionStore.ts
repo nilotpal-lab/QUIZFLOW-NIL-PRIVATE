@@ -774,24 +774,24 @@ export function subscribeToSession(
   }
   window.addEventListener('storage', onStorage)
 
-  // 5. Cloud Room Relay Polling — now a slow 3s failsafe only.
-  // Supabase Realtime WebSockets deliver all real-time updates in <15ms.
-  // Polling at 400ms was generating ~375 HTTP GET requests/sec with 150 players,
-  // overloading Vercel serverless and causing 5-15s cold-start delays.
+  // 5. Cloud Room Relay Polling — responsive 1000ms polling with instant wake recovery.
+  // Combines zero-latency Supabase WebSockets with rapid 1s HTTP fallback so no mobile
+  // device experiences delayed question transitions if a network packet drops.
   let lastPollAt = 0
-  const poll = () => {
-    if (typeof document !== 'undefined' && document.hidden) return
+  const poll = (force = false) => {
+    if (typeof document !== 'undefined' && document.hidden && !force) return
     const now = Date.now()
-    const minInterval = 3000 // 3s fallback — WebSocket handles real-time
+    const minInterval = force ? 0 : 1000 // 1000ms fast sync
     if (now - lastPollAt < minInterval) return
     lastPollAt = now
     fetchRemoteState(pin).then(remote => {
       if (remote) notify(remote)
     })
   }
-  const pollInterval = setInterval(poll, 3000)
-  const onVisible = () => { if (!document.hidden) poll() }
+  const pollInterval = setInterval(() => poll(false), 1000)
+  const onVisible = () => { if (!document.hidden) { lastPollAt = 0; poll(true) } }
   document.addEventListener('visibilitychange', onVisible)
+  window.addEventListener('focus', onVisible)
 
   // 6. Supabase Realtime WebSocket subscription (zero-latency internet sync)
   let sbSub: any = null
@@ -860,13 +860,14 @@ export function subscribeToSession(
             }
 
             const data = res.payload.data || {}
-            const isCorrect = data.correct !== undefined ? Boolean(data.correct) : false
-            const points = Math.min(1000, Math.max(0, Number(data.points) || 0))
+            const isCorrect = Boolean(data.correct)
+            const points = Number(data.points) || 0
+
             const updatedPlayer: Player = {
               ...p,
               hasAnswered: true,
               lastAnsweredQIdx: qIdx,
-              selectedIndex: data.selectedIndex !== undefined ? data.selectedIndex : p.selectedIndex,
+              selectedIndex: typeof data.selectedIndex === 'number' ? data.selectedIndex : p.selectedIndex,
               lastAnswerCorrect: isCorrect,
               score: (p.score || 0) + points,
               lastPointsEarned: points,
@@ -897,6 +898,10 @@ export function subscribeToSession(
               event: 'request_state',
               payload: { pin }
             }).catch(() => {})
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            // Rapidly recover state via HTTP fallback if WebSocket encounters transient network blip
+            lastPollAt = 0
+            poll(true)
           }
         })
     } catch {
@@ -1530,7 +1535,8 @@ export function submitAnswer(pin: string, playerId: string, selectedIndex: numbe
   const q = state.quiz?.questions?.[state.currentQuestionIndex]
   if (!q) return
 
-  const isCorrect = selectedIndex === q.correct_index
+  const isKnownCorrect = (typeof q.correct_index === 'number') ? (selectedIndex === q.correct_index) : null
+  const isCorrect = isKnownCorrect !== null ? isKnownCorrect : false
   const now = Date.now()
   const timeRemainingMs = state.isPaused
     ? Math.max(0, state.pausedTimeRemainingMs || 0)
@@ -1580,7 +1586,7 @@ export function submitAnswer(pin: string, playerId: string, selectedIndex: numbe
     ...player,
     hasAnswered: true,
     selectedIndex,
-    lastAnswerCorrect: isCorrect,
+    lastAnswerCorrect: isKnownCorrect,
     lastPointsEarned: points,
     score: Math.max(0, player.score + points),
     streak: newStreak,

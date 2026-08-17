@@ -672,7 +672,10 @@ function StudentPlayScreen() {
   // ── QUESTION ACTIVE or REVEAL STATE ──
   const hasAnswered = me?.hasAnswered ?? false
   const isRevealed  = gameState.status === 'question_reveal'
-  const myCorrect   = me?.lastAnswerCorrect
+  const isActuallyCorrect = (typeof q?.correct_index === 'number' && typeof me?.selectedIndex === 'number')
+    ? (me.selectedIndex === q.correct_index)
+    : (me?.lastAnswerCorrect ?? false)
+  const myCorrect   = isRevealed ? isActuallyCorrect : me?.lastAnswerCorrect
   const streakCount = me?.streak ?? 0
 
   return (
@@ -1339,9 +1342,9 @@ function StudentPlayScreen() {
             {myCorrect ? (
               <div>
                 <div style={{ fontFamily: 'Space Grotesk', fontWeight: 900, fontSize: 20, color: 'var(--ink)' }}>
-                  ✅ Correct! +{(me.lastPointsEarned ?? 0).toLocaleString()} pts
+                  ✅ Correct! +{((me.lastPointsEarned && me.lastPointsEarned > 0) ? me.lastPointsEarned : (popupPoints > 0 ? popupPoints : 1000)).toLocaleString()} pts
                 </div>
-                {me.lastPointsEarned > 1000 && (
+                {((me.lastPointsEarned && me.lastPointsEarned > 1000) || popupPoints > 1000) && (
                   <div style={{ fontSize: 12, fontFamily: 'Space Grotesk', fontWeight: 800, color: 'var(--ink)', opacity: 0.8, marginTop: 4 }}>
                     ⚡ Speed & Streak Multiplier Applied!
                   </div>
