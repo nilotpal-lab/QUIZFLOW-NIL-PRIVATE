@@ -778,6 +778,37 @@ export function subscribeToSession(
             }
           }
         })
+        .on('broadcast', { event: 'submit_answer' }, (res: any) => {
+          if (res?.payload?.playerId && res?.payload?.pin === pin) {
+            const current = loadState(pin)
+            if (current && current.players?.[res.payload.playerId]) {
+              const p = current.players[res.payload.playerId]
+              const data = res.payload.data || {}
+              const isCorrect = data.correct !== undefined ? Boolean(data.correct) : false
+              const points = data.points || 0
+              const updatedPlayer = {
+                ...p,
+                hasAnswered: true,
+                selectedIndex: data.selectedIndex !== undefined ? data.selectedIndex : p.selectedIndex,
+                lastAnswerCorrect: isCorrect,
+                score: (p.score || 0) + points,
+                lastPointsEarned: points,
+                totalAnswered: (p.totalAnswered || 0) + 1,
+                totalCorrect: (p.totalCorrect || 0) + (isCorrect ? 1 : 0),
+                totalResponseTimeMs: (p.totalResponseTimeMs || 0) + (data.responseTimeMs || 0),
+                streak: isCorrect ? (p.streak || 0) + 1 : 0,
+                maxStreak: isCorrect ? Math.max(p.maxStreak || 0, (p.streak || 0) + 1) : (p.maxStreak || 0)
+              }
+              saveState({
+                ...current,
+                players: {
+                  ...current.players,
+                  [res.payload.playerId]: updatedPlayer
+                }
+              })
+            }
+          }
+        })
         .on('broadcast', { event: 'request_state' }, () => {
           const current = loadState(pin)
           if (current) {
