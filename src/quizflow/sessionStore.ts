@@ -898,8 +898,14 @@ export function isHostAuthorized(pin: string, stateHostId?: string): boolean {
     if (user?.id && user.id === stateHostId) return true
   } catch {}
 
-  // 3. Demo / local dev fallback
-  if (stateHostId === 'host-demo' || stateHostId.startsWith('host_demo_')) return true
+  // 3. Demo / local dev / live host fallback
+  if (
+    stateHostId === 'host-demo' || 
+    stateHostId === 'host_live' || 
+    stateHostId.startsWith('host_demo_') || 
+    stateHostId.startsWith('host_live') ||
+    stateHostId.startsWith('host_anon')
+  ) return true
 
   return false
 }
