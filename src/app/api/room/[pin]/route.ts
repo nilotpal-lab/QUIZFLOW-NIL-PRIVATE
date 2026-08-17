@@ -81,34 +81,34 @@ function writeTmpRoom(pin: string, data: { state: any; updatedAt: number }) {
 // Supabase DB persistence.
 // Joins, room creation, and status transitions write immediately and are awaited (forceImmediate=true).
 // Rapid in-game answer submissions debounce at 1500ms to reduce DB pressure during 150-player games.
-const _pendingDbWrites = new Map<string, { state: any; timer: ReturnType<typeof setTimeout> }>()
+const _realtimeChannels = new Map<string, any>()
 
-function debouncedSupabaseUpsert(pin: string, state: any, forceImmediate = false) {
-  if (!supabase || !state) return
+function getSupabaseRealtimeChannel(pin: string) {
+  if (!supabase) return null
+  let ch = _realtimeChannels.get(pin)
+  if (!ch) {
+    ch = supabase.channel(`qf_room_${pin}`, {
+      config: { broadcast: { self: true } }
+    })
+    ch.subscribe()
+    _realtimeChannels.set(pin, ch)
+  }
+  return ch
+}
 
-  const existing = _pendingDbWrites.get(pin)
-  if (forceImmediate) {
-    if (existing) {
-      clearTimeout(existing.timer)
-      _pendingDbWrites.delete(pin)
+async function broadcastToSupabaseRealtime(pin: string, event: string, payload: any) {
+  try {
+    const ch = getSupabaseRealtimeChannel(pin)
+    if (ch) {
+      await ch.send({
+        type: 'broadcast',
+        event,
+        payload
+      })
     }
-    performSupabaseWrite(pin, state) // fire and forget non-blocking
-    return
+  } catch (err) {
+    console.warn(`[Realtime Broadcast Warning] room_${pin}:`, err)
   }
-
-  if (existing) {
-    existing.state = state
-    return
-  }
-
-  const entry = {
-    state,
-    timer: setTimeout(() => {
-      _pendingDbWrites.delete(pin)
-      performSupabaseWrite(pin, entry.state)
-    }, 1500)
-  }
-  _pendingDbWrites.set(pin, entry)
 }
 
 async function performSupabaseWrite(pin: string, current: any): Promise<void> {
@@ -719,16 +719,19 @@ export async function POST(
             joinedAt: existingPlayer ? existingPlayer.joinedAt : Date.now(),
             connected: true,
             coins: existingPlayer ? (existingPlayer.coins || 0) : 0,
-            violations: existingPlayer ? (existingPlayer.violations || 0) : 0,
-            flagged: existingPlayer ? Boolean(existingPlayer.flagged) : false,
             frenzyScore: existingPlayer ? (existingPlayer.frenzyScore || 0) : 0
           }
         }
       }
 
+      if (player) {
+        broadcastToSupabaseRealtime(pin, 'player_join', { pin, player })
+      }
+
     } else if (action === 'reaction' && reaction && current) {
       const reactions = [...(current.reactions || []), reaction].slice(-25)
       current = { ...current, reactions }
+      broadcastToSupabaseRealtime(pin, 'reaction', { pin, reaction })
     }
 
     if (!current) {
@@ -740,19 +743,9 @@ export async function POST(
     rooms.set(pin, item)
     writeTmpRoom(pin, item)
 
-    // 2. Supabase DB Sync
-    // - Joins, Room creation/push, Status transitions (start game, next Q, reveal, end): force-immediate & awaited
-    // - Answer submits & reactions: debounced at 1500ms for high concurrency
-    const prevStatus = rooms.get(pin)?.state?.status
-    const isStatusTransition = Boolean(state && state.status !== prevStatus)
-    const isJoin = action === 'join'
-    const isPowerUp = action === 'buy_powerup'
-    const isViolation = action === 'report_violation'
-    const isEnded = current.status === 'ended'
-    const forceNow = isJoin || isStatusTransition || isPowerUp || isViolation || isEnded || !action // !action = host full-state push
-
+    // 2. Supabase Realtime & DB Sync
     if (supabase) {
-      debouncedSupabaseUpsert(pin, current, forceNow)
+      broadcastToSupabaseRealtime(pin, 'state_sync', current)
     }
 
     return NextResponse.json({
