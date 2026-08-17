@@ -571,6 +571,18 @@ export async function POST(
 
           const updatedPlayers = { ...current.players, [playerId]: updatedPlayer }
           current = { ...current, bossHealth: bossHp, players: updatedPlayers }
+
+          // Broadcast submit_answer to Host WebSocket channel for instant real-time scoreboard update
+          broadcastToSupabaseRealtime(pin, 'submit_answer', {
+            pin,
+            playerId,
+            data: {
+              selectedIndex,
+              correct: isCorrect,
+              points,
+              responseTimeMs: effectiveResponseTimeMs
+            }
+          })
         }
       }
 

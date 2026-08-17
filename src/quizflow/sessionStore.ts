@@ -1568,7 +1568,33 @@ export function submitAnswer(pin: string, playerId: string, selectedIndex: numbe
     masteryRankings: mastery,
   }, { relay: false })
 
-  // Direct cloud API sync for cross-device answer submission guarantee
+  // 1. Broadcast answer directly to Host Screen over Supabase Realtime WebSocket for instant 0ms arrival
+  if (supabase) {
+    try {
+      if (!_relayChannels[pin]) {
+        _relayChannels[pin] = supabase.channel(`qf_room_${pin}`, {
+          config: { broadcast: { self: true } }
+        })
+        _relayChannels[pin].subscribe()
+      }
+      _relayChannels[pin].send({
+        type: 'broadcast',
+        event: 'submit_answer',
+        payload: {
+          pin,
+          playerId,
+          data: {
+            selectedIndex,
+            correct: isCorrect,
+            points,
+            responseTimeMs
+          }
+        }
+      }).catch(() => {})
+    } catch {}
+  }
+
+  // 2. Direct cloud API sync for cross-device answer submission guarantee
   if (typeof window !== 'undefined') {
     fetch(`/api/room/${pin}?_t=${Date.now()}`, {
       method: 'POST',
