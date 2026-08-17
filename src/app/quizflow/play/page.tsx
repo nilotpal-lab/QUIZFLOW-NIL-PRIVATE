@@ -69,8 +69,6 @@ function StudentPlayScreen() {
   const [hiddenChoices, setHiddenChoices] = useState<Set<number>>(new Set())
   const [frozen, setFrozen]             = useState(false)
   const [doubleActive, setDoubleActive] = useState(false)
-  const [showPopup, setShowPopup]       = useState(false)
-  const [popupPoints, setPopupPoints]   = useState(0)
   const [prevQIndex, setPrevQIndex]     = useState(-1)
   const [playedRevealSound, setPlayedRevealSound] = useState(false)
   const [activeBoard, setActiveBoard]   = useState<'tactics' | 'mastery'>('tactics')
@@ -218,8 +216,6 @@ function StudentPlayScreen() {
       setPlayedRevealSound(false)
       setIsTTSActive(false)
       stopSpeech()
-      setShowPopup(false)
-      setPopupPoints(0)
       setAnswerResponseMs(undefined)
       setShowDamageParticles(false)
       setParticleTrigger(null)
@@ -390,17 +386,8 @@ function StudentPlayScreen() {
     const elapsed = gameState.questionStartedAt > 0 ? Date.now() - gameState.questionStartedAt : undefined
     setAnswerResponseMs(elapsed)
 
-    if (q) {
-      const isCorrect = idx === q.correct_index
-      const bidMult = me?.bidMultiplier ?? 1
-      const result = calculatePoints(timeMs, totalTime, isCorrect, me?.streak || 0, doubleActive || bidMult > 1)
-      // Scale raw points by bid multiplier to match server-authoritative score shown in popup
-      const displayPoints = bidMult > 1 && !doubleActive ? Math.min(12000, Math.round(result.points * bidMult)) : result.points
-      setPopupPoints(displayPoints)
-      setShowPopup(true)
-    }
     submitAnswer(pin, playerId, idx, doubleActive)
-  }, [gameState, me, q, timeMs, totalTime, doubleActive, pin, playerId])
+  }, [gameState, me, doubleActive, pin, playerId])
 
   const usePowerUp = (type: PowerUpType) => {
     // Guard: power-ups only valid during active unanswered question
@@ -700,8 +687,6 @@ function StudentPlayScreen() {
         totalCorrect={me?.totalCorrect}
         totalAnswered={me?.totalAnswered}
       />
-
-      {showPopup && <ScorePopup points={popupPoints} onDone={() => setShowPopup(false)} />}
 
       {/* FULLSCREEN PROMPT — shown when not fullscreen during active question and fullscreen is supported by browser */}
       {!fullscreenActive && fullscreenSupported && (gameState.status === 'question_active' || gameState.status === 'question_reveal') && (
@@ -1332,98 +1317,12 @@ function StudentPlayScreen() {
           </div>
         )}
 
-        {/* Reveal feedback & Diagnostic Explanation TTS */}
-        {isRevealed && me && (
-          <div className={`card anim-scale-in ${streakCount >= 5 && myCorrect ? 'anim-shake' : ''}`} style={{
-            padding: '18px 20px',
-            background: myCorrect ? 'var(--mint)' : 'var(--cherry)',
-            textAlign: 'center'
-          }}>
-            {myCorrect ? (
-              <div>
-                <div style={{ fontFamily: 'Space Grotesk', fontWeight: 900, fontSize: 20, color: 'var(--ink)' }}>
-                  ✅ Correct! +{((me.lastPointsEarned && me.lastPointsEarned > 0) ? me.lastPointsEarned : (popupPoints > 0 ? popupPoints : 1000)).toLocaleString()} pts
-                </div>
-                {((me.lastPointsEarned && me.lastPointsEarned > 1000) || popupPoints > 1000) && (
-                  <div style={{ fontSize: 12, fontFamily: 'Space Grotesk', fontWeight: 800, color: 'var(--ink)', opacity: 0.8, marginTop: 4 }}>
-                    ⚡ Speed & Streak Multiplier Applied!
-                  </div>
-                )}
-              </div>
-            ) : me.selectedIndex !== null ? (
-              <div style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 16, color: 'var(--paper)' }}>
-                ❌ Wrong! The answer was: <span style={{ color: 'var(--sun)' }}>{q?.choices[q.correct_index]}</span>
-              </div>
-            ) : (
-              <div style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 16, color: 'var(--paper)' }}>
-                ⏰ Time&apos;s up! The answer was: <span style={{ color: 'var(--sun)' }}>{q?.choices[q?.correct_index ?? 0]}</span>
-              </div>
-            )}
-            {q?.explanation && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                <div style={{ color: 'var(--ink)', fontSize: 13, fontFamily: 'Inter', opacity: 0.85, fontWeight: 500 }}>
-                  💡 {q.explanation}
-                </div>
-                {ENABLE_TTS_AUDIO && (
-                  <button
-                    type="button"
-                    onClick={() => handleToggleTTS(q.explanation || '')}
-                    style={{
-                      padding: '4px 12px',
-                      background: 'var(--paper)',
-                      border: '1.5px solid var(--ink)',
-                      borderRadius: 'var(--radius-pill)',
-                      boxShadow: '2px 2px 0px var(--ink)',
-                      fontFamily: 'Space Grotesk',
-                      fontSize: 11,
-                      fontWeight: 800,
-                      color: 'var(--ink)',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      marginTop: 4
-                    }}
-                  >
-                    <span>🔊</span> Read Explanation
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Targeted Diagnostic Misconception Analysis */}
-            {!myCorrect && me.selectedIndex !== null && (
-              <div className="anim-scale-in" style={{
-                marginTop: 12,
-                padding: '12px 14px',
-                background: 'var(--paper)',
-                border: '2px solid var(--ink)',
-                borderRadius: 12,
-                boxShadow: '3px 3px 0 var(--ink)',
-                textAlign: 'left',
-                color: 'var(--ink)'
-              }}>
-                <div style={{
-                  fontFamily: 'Space Grotesk',
-                  fontWeight: 800,
-                  fontSize: 12,
-                  color: 'var(--cherry)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  marginBottom: 4,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em'
-                }}>
-                  <span>🔍 Diagnostic Misconception Analysis</span>
-                </div>
-                <div style={{ fontFamily: 'Inter', fontSize: 13, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.45 }}>
-                  {q?.misconceptions?.[me.selectedIndex] || `Choosing "${q?.choices[me.selectedIndex]}" reflects a common misconception confusing it with ${q?.choices[q.correct_index]}.`}
-                </div>
-              </div>
-            )}
-
-            <div style={{ color: 'var(--ink)', fontSize: 11, marginTop: 10, fontFamily: 'Inter', opacity: 0.55 }}>Waiting for next question…</div>
+        {/* Clean reveal footer indicator */}
+        {isRevealed && (
+          <div className="card anim-scale-in" style={{ padding: '14px 18px', textAlign: 'center', background: 'var(--paper-2)', borderColor: 'var(--ink)' }}>
+            <div style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 15, color: 'var(--ink)' }}>
+              👁 Correct answer revealed! Loading Leaderboard…
+            </div>
           </div>
         )}
 
