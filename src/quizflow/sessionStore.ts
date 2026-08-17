@@ -122,14 +122,16 @@ export function mergeGameStates(current: GameState | null, incoming: GameState |
   if (!incoming) return current
 
   // 1. Session Identity & Re-creation Precedence
-  // If incoming has a newer createdAt, a new session was created on the same PIN.
-  // We must not merge dead players or stale state from the previous session.
+  // If incoming has a newer createdAt AND both/neither have quiz questions, a new session was created on the same PIN.
   const curCreated = current.createdAt || 0
   const inCreated = incoming.createdAt || 0
-  if (inCreated > curCreated) {
+  const curHasQuestions = (current.quiz?.questions?.length || 0) > 0
+  const inHasQuestions = (incoming.quiz?.questions?.length || 0) > 0
+
+  if (inCreated > curCreated && (!curHasQuestions || inHasQuestions)) {
     return incoming
   }
-  if (curCreated > inCreated) {
+  if (curCreated > inCreated && (!inHasQuestions || curHasQuestions)) {
     return current
   }
 

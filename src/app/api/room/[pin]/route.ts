@@ -679,7 +679,7 @@ export async function POST(
           questionEndsAt: 0,
           players: {},
           hostId: 'host_live',
-          createdAt: Date.now()
+          createdAt: 0
         }
       }
 
