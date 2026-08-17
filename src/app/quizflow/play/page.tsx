@@ -1,5 +1,4 @@
 'use client'
-export const dynamic = 'force-dynamic'
 import { Suspense } from 'react'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
