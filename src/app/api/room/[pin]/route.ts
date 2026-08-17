@@ -100,10 +100,21 @@ async function broadcastToSupabaseRealtime(pin: string, event: string, payload: 
   try {
     const ch = getSupabaseRealtimeChannel(pin)
     if (ch) {
+      let broadcastPayload = payload
+      if (event === 'state_sync' && payload && payload.players) {
+        const topTactics = payload.tacticsRankings?.slice(0, 10) || []
+        const topMastery = payload.masteryRankings?.slice(0, 10) || []
+        broadcastPayload = {
+          ...payload,
+          players: Object.fromEntries(topTactics.map((p: any) => [p.id, p])),
+          tacticsRankings: topTactics,
+          masteryRankings: topMastery,
+        }
+      }
       await ch.send({
         type: 'broadcast',
         event,
-        payload
+        payload: broadcastPayload
       })
     }
   } catch (err) {

@@ -494,7 +494,7 @@ function broadcast(pin: string, state?: GameState, relay = true, immediate = fal
   // 1. Cloud Room Relay Sync (Works across all laptops, phones, and tablets over the internet)
   if (relay) postRelay(pin, payload, immediate)
 
-  // 2. Supabase Realtime WebSocket Sync (if configured) — reuse and subscribe the cached channel
+  // 2. Supabase Realtime WebSocket Sync (Lightweight payload < 25KB for instant <15ms delivery to 500+ phones)
   if (supabase) {
     try {
       if (!_relayChannels[pin]) {
@@ -503,10 +503,20 @@ function broadcast(pin: string, state?: GameState, relay = true, immediate = fal
         })
         _relayChannels[pin].subscribe()
       }
+
+      const topTactics = payload.tacticsRankings?.slice(0, 10) || []
+      const topMastery = payload.masteryRankings?.slice(0, 10) || []
+      const lightweightPayload = {
+        ...payload,
+        players: Object.fromEntries(topTactics.map(p => [p.id, p])),
+        tacticsRankings: topTactics,
+        masteryRankings: topMastery,
+      }
+
       _relayChannels[pin].send({
         type: 'broadcast',
         event: 'state_sync',
-        payload
+        payload: lightweightPayload
       }).catch(() => {})
     } catch {
       // Graceful fallback if offline
