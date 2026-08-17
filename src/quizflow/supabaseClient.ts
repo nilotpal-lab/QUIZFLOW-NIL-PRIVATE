@@ -18,12 +18,6 @@ function getSupabaseClient(): SupabaseClient | null {
   // Already resolved — return cached result
   if (_supabase !== false) return _supabase
 
-  // Only run in browser
-  if (typeof window === 'undefined') {
-    _supabase = null
-    return null
-  }
-
   // Validate config
   if (
     !supabaseUrl ||
@@ -35,7 +29,20 @@ function getSupabaseClient(): SupabaseClient | null {
     return null
   }
 
-  // Probe storage access
+  // Server-side (Node.js / Vercel Serverless API Routes)
+  if (typeof window === 'undefined') {
+    try {
+      _supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: { persistSession: false }
+      })
+      return _supabase
+    } catch {
+      _supabase = null
+      return null
+    }
+  }
+
+  // Client-side (Browser) - Probe storage access
   let storageOk = false
   try {
     const testKey = '__qf_storage_probe__'
