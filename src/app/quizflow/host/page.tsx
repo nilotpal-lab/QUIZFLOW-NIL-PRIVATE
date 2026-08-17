@@ -50,6 +50,9 @@ function TeacherHostDashboard() {
   const autoAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null)
   const frenzyTimerRef      = useRef<NodeJS.Timeout | null>(null)
 
+  const autoAdvanceDeadlineRef = useRef<number | null>(null)
+  const lastAutoPhaseRef       = useRef<string | null>(null)
+
   // Redirect if no PIN
   useEffect(() => {
     if (!pin) router.push('/quizflow/host/new')
@@ -83,53 +86,64 @@ function TeacherHostDashboard() {
 
   // Auto-pacing orchestrator (Auto-Reveal -> Auto-Leaderboard -> Auto-Next Question / Auto-Tournament Advance)
   useEffect(() => {
-    if (autoAdvanceTimerRef.current) clearInterval(autoAdvanceTimerRef.current)
-    setAutoAdvanceCountdown(null)
-    if (!autoPacing || !gameState || !pin) return
+    if (!autoPacing || !gameState || !pin) {
+      if (autoAdvanceTimerRef.current) clearInterval(autoAdvanceTimerRef.current)
+      autoAdvanceDeadlineRef.current = null
+      lastAutoPhaseRef.current = null
+      setAutoAdvanceCountdown(null)
+      return
+    }
 
-    if (gameState.status === 'question_reveal') {
-      let secondsLeft = 4
-      setAutoAdvanceCountdown(secondsLeft)
-      autoAdvanceTimerRef.current = setInterval(() => {
-        secondsLeft -= 1
-        setAutoAdvanceCountdown(Math.max(0, secondsLeft))
-        if (secondsLeft <= 0) {
-          clearInterval(autoAdvanceTimerRef.current!)
-          setAutoAdvanceCountdown(null)
-          showLeaderboard(pin)
-        }
-      }, 1000)
-    } else if (gameState.status === 'leaderboard') {
-      const isTournament = Boolean(gameState.tournamentConfig)
-      const currentRoundIdx = gameState.tournamentConfig?.currentRoundIndex ?? 0
-      const totalRounds = gameState.tournamentConfig?.rounds?.length ?? 0
-      const hasNextRound = isTournament && currentRoundIdx + 1 < totalRounds
+    const currentPhaseKey = `${gameState.status}_${gameState.currentQuestionIndex}_${gameState.currentRound || 1}`
+    if (lastAutoPhaseRef.current !== currentPhaseKey) {
+      lastAutoPhaseRef.current = currentPhaseKey
+      if (gameState.status === 'question_reveal') {
+        autoAdvanceDeadlineRef.current = Date.now() + 4000
+      } else if (gameState.status === 'leaderboard') {
+        autoAdvanceDeadlineRef.current = Date.now() + 5000
+      } else {
+        autoAdvanceDeadlineRef.current = null
+        setAutoAdvanceCountdown(null)
+      }
+    }
 
-      let secondsLeft = 5
-      setAutoAdvanceCountdown(secondsLeft)
-      autoAdvanceTimerRef.current = setInterval(() => {
-        secondsLeft -= 1
-        setAutoAdvanceCountdown(Math.max(0, secondsLeft))
-        if (secondsLeft <= 0) {
-          clearInterval(autoAdvanceTimerRef.current!)
+    if (autoAdvanceDeadlineRef.current) {
+      if (autoAdvanceTimerRef.current) clearInterval(autoAdvanceTimerRef.current)
+      const tickAuto = () => {
+        if (!autoAdvanceDeadlineRef.current) return
+        const remaining = Math.max(0, Math.ceil((autoAdvanceDeadlineRef.current - Date.now()) / 1000))
+        setAutoAdvanceCountdown(remaining)
+        if (Date.now() >= autoAdvanceDeadlineRef.current) {
+          autoAdvanceDeadlineRef.current = null
           setAutoAdvanceCountdown(null)
-          if (qIdx + 1 < totalQ) {
-            nextQuestion(pin)
-          } else if (hasNextRound) {
-            // In Tournament mode on last Q of round, advance round!
-            advanceTournamentRound(pin)
-          } else {
-            // Final round complete
-            endGame(pin)
+          if (autoAdvanceTimerRef.current) clearInterval(autoAdvanceTimerRef.current)
+
+          if (gameState.status === 'question_reveal') {
+            showLeaderboard(pin)
+          } else if (gameState.status === 'leaderboard') {
+            const isTournament = Boolean(gameState.tournamentConfig)
+            const currentRoundIdx = gameState.tournamentConfig?.currentRoundIndex ?? 0
+            const totalRounds = gameState.tournamentConfig?.rounds?.length ?? 0
+            const hasNextRound = isTournament && currentRoundIdx + 1 < totalRounds
+
+            if (qIdx + 1 < totalQ) {
+              nextQuestion(pin)
+            } else if (hasNextRound) {
+              advanceTournamentRound(pin)
+            } else {
+              endGame(pin)
+            }
           }
         }
-      }, 1000)
+      }
+      tickAuto()
+      autoAdvanceTimerRef.current = setInterval(tickAuto, 250)
     }
 
     return () => {
       if (autoAdvanceTimerRef.current) clearInterval(autoAdvanceTimerRef.current)
     }
-  }, [gameState?.status, gameState?.currentQuestionIndex, autoPacing, pin, qIdx, totalQ, gameState?.tournamentConfig])
+  }, [gameState?.status, gameState?.currentQuestionIndex, gameState?.currentRound, autoPacing, pin, qIdx, totalQ, gameState?.tournamentConfig])
 
   // Host timer countdown & reveal when time expires
   useEffect(() => {
@@ -156,12 +170,13 @@ function TeacherHostDashboard() {
     return () => clearInterval(timerRef.current!)
   }, [gameState?.status, gameState?.currentQuestionIndex, gameState?.questionEndsAt, gameState?.isPaused, gameState?.pausedTimeRemainingMs, pin, revealedIndex])
 
-  // Auto-reveal when ALL joined players have answered (minimum 2s after start)
+  // Auto-reveal when ALL joined players have answered (minimum 3s after start)
   useEffect(() => {
     if (!gameState || gameState.status !== 'question_active') return
     const playersList = Object.values(gameState.players || {})
     const elapsed = Date.now() - (gameState.questionStartedAt || 0)
-    if (playersList.length > 0 && elapsed >= 2000 && playersList.every(p => p.hasAnswered)) {
+    const allAnswered = playersList.length > 0 && playersList.every(p => p.hasAnswered)
+    if (playersList.length > 0 && elapsed >= 3000 && allAnswered) {
       if (revealedIndex !== gameState.currentQuestionIndex) {
         setRevealedIndex(gameState.currentQuestionIndex)
         revealAnswer(pin)
