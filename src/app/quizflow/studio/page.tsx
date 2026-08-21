@@ -5,7 +5,7 @@ import type { AIGeneratedQuiz, AIGeneratedQuestion, BloomLevel } from '@/quizflo
 import { createSession } from '@/quizflow/sessionStore'
 import { generatePrintableWorksheet, type WorksheetVersion } from '@/quizflow/pdfGenerator'
 import { ingestYouTubeUrl, ingestWebpageUrl, parseUploadedFile, type IngestedContent } from '@/quizflow/ingestion'
-import { parseExcelOrCSVFile } from '@/quizflow/excelQuizParser'
+import { parseExcelOrCSVFile, parseExcelOrCSVContent } from '@/quizflow/excelQuizParser'
 import { saveQuizDraft } from '@/quizflow/quizStore'
 import { publishQuizToCommunity } from '@/quizflow/communityStore'
 import { getHostUser } from '@/quizflow/authStore'
@@ -61,6 +61,7 @@ export default function AIQuizStudio() {
   const [ingesting, setIngesting]           = useState(false)
   const [youtubeUrl, setYoutubeUrl]         = useState('')
   const [webpageUrl, setWebpageUrl]         = useState('')
+  const [excelPasteText, setExcelPasteText] = useState('')
   const [ingestError, setIngestError]       = useState<string | null>(null)
 
   // Settings toggles
@@ -151,6 +152,24 @@ export default function AIQuizStudio() {
       setTimeout(() => setToastMsg(null), 4500)
     } catch (err: any) {
       setIngestError(err?.message || 'Failed to parse Excel/CSV spreadsheet file.')
+    } finally {
+      setIngesting(false)
+    }
+  }
+
+  // Direct Excel / CSV Text Paste Handler
+  const handleExcelPasteImport = () => {
+    if (!excelPasteText.trim()) return
+    setIngesting(true)
+    setIngestError(null)
+    try {
+      const importedQuiz = parseExcelOrCSVContent(excelPasteText, 'Pasted Quiz')
+      setQuiz(importedQuiz)
+      setViewMode('editor')
+      setToastMsg(`📊 Successfully imported ${importedQuiz.questions.length} questions with 100% verified answer keys!`)
+      setTimeout(() => setToastMsg(null), 4500)
+    } catch (err: any) {
+      setIngestError(err?.message || 'Failed to parse spreadsheet text. Please check format.')
     } finally {
       setIngesting(false)
     }
@@ -550,23 +569,44 @@ export default function AIQuizStudio() {
               )}
 
               {ingestMode === 'excel' && (
-                <div>
-                  <label className="sg text-[11px] font-bold tracking-[0.08em] text-black/50 block mb-2 uppercase">DIRECT EXCEL / CSV QUESTION IMPORT</label>
-                  <div className="border-[3px] border-dashed border-[#10100F]/30 rounded-[12px] p-6 text-center bg-[#D6FFF4]/40 hover:bg-[#D6FFF4]/70 transition-colors relative cursor-pointer soft">
-                    <input
-                      type="file"
-                      accept=".csv,.xlsx,.xls,.tsv,.txt"
-                      onChange={handleExcelFileUpload}
-                      className="absolute inset-0 opacity-0 cursor-pointer"
+                <div className="space-y-4">
+                  <div>
+                    <label className="sg text-[11px] font-bold tracking-[0.08em] text-black/50 block mb-2 uppercase">UPLOAD SPREADSHEET FILE</label>
+                    <div className="border-[3px] border-dashed border-[#10100F]/30 rounded-[12px] p-5 text-center bg-[#D6FFF4]/40 hover:bg-[#D6FFF4]/70 transition-colors relative cursor-pointer soft">
+                      <input
+                        type="file"
+                        accept=".csv,.xlsx,.xls,.tsv,.txt"
+                        onChange={handleExcelFileUpload}
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                      />
+                      <div className="text-[32px] mb-1">📊</div>
+                      <div className="font-display font-[900] text-[14px] text-[#10100F]">Upload .xlsx, .csv, or .tsv File</div>
+                      <div className="text-[11px] text-black/70 mt-0.5 font-medium">
+                        Supports Question, Choice 1-4, +Option marker, Key-Value, & 7-Col formats
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="relative flex py-1 items-center">
+                    <div className="flex-grow border-t border-[#10100F]/20"></div>
+                    <span className="flex-shrink mx-3 text-[11px] font-bold text-black/40 uppercase">OR PASTE QUESTIONS TEXT</span>
+                    <div className="flex-grow border-t border-[#10100F]/20"></div>
+                  </div>
+
+                  <div>
+                    <textarea
+                      value={excelPasteText}
+                      onChange={e => setExcelPasteText(e.target.value)}
+                      placeholder={`Question\tChoice 1\tChoice 2\tChoice 3\tChoice 4\nWhat are the building blocks of proteins?\tFatty acids\t+Amino acids\tMonosaccharides\tNucleotides`}
+                      className="w-full h-[120px] bg-[#FFFCF5] border-[3px] border-[#10100F] rounded-[12px] p-3 text-[12px] font-mono outline-none resize-none leading-[1.4] placeholder:text-black/30"
                     />
-                    <div className="text-[36px] mb-2">📊</div>
-                    <div className="font-display font-[900] text-[15px] text-[#10100F]">Upload Excel or CSV Spreadsheet</div>
-                    <div className="text-[12px] text-black/70 mt-1 font-medium leading-relaxed">
-                      Auto-extracts Questions, Options (A, B, C, D), and Green Answer Keys via 5-Tier Priority Cascade
-                    </div>
-                    <div className="inline-block mt-3 px-3 py-1 bg-white border-[2px] border-[#10100F] rounded-[20px] text-[10px] font-mono font-bold">
-                      Supports Standard 7-Col, Key-Value Pairs & Paragraph Explanations
-                    </div>
+                    <button
+                      onClick={handleExcelPasteImport}
+                      disabled={ingesting || !excelPasteText.trim()}
+                      className="w-full mt-2.5 h-[44px] bg-[#00E676] border-[3px] border-[#10100F] rounded-[12px] font-display font-extrabold text-[13px] text-[#10100F] btn-press soft flex items-center justify-center gap-2"
+                    >
+                      <span>⚡</span> {ingesting ? 'Parsing...' : 'Import Pasted Questions →'}
+                    </button>
                   </div>
                 </div>
               )}

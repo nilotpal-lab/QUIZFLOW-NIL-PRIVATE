@@ -24,19 +24,32 @@ export function sanitizeText(str: any): string {
     .replace(/PK\x03\x04[^\n]*/g, '')
     .replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F\uFFFD]/g, '')
     .replace(/[\u0002\u0003\u0004\u0005]/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
+}
+
+export function sanitizeRawSpreadsheetContent(str: any): string {
+  if (str === null || str === undefined) return ''
+  return String(str)
+    .replace(/PK\x03\x04[^\n]*/g, '')
+    .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F\uFFFD]/g, '')
+    .replace(/[\u0002\u0003\u0004\u0005]/g, '')
     .trim()
 }
 
 /**
- * Step 0: Strips leading option prefixes like "A.", "B)", "1.", "(A)", "Option A: "
+ * Step 0: Strips leading option prefixes like "+", "*", "A.", "B)", "1.", "(A)", "Option A: ", "(correct)"
  */
 export function cleanOptionText(text: string): string {
   if (!text) return ''
   const clean = sanitizeText(text)
   return clean
+    .replace(/^[\+\*\✓\✔\★\s]+/, '')
+    .replace(/\[x\]/i, '')
+    .replace(/\(correct\)/i, '')
     .replace(/^[\(\[\{]?[A-Da-d1-4][\)\]\.\:\-]\s*/, '')
     .replace(/^(option|choice)\s+[A-Da-d1-4][\.\:]?\s*/i, '')
+    .replace(/^[\+\*\✓\✔\★\s]+/, '')
     .trim()
 }
 
@@ -52,6 +65,16 @@ export function resolveQuestionCorrectIndex(
   const cleanedChoices = choices.map(cleanOptionText)
   const normKey = sanitizeText(rawCorrectKey)
   const normExp = sanitizeText(explanationText)
+
+  // -----------------------------------------------------------------
+  // PRIORITY 0: Embedded '+' / '*' marker in choice text
+  // -----------------------------------------------------------------
+  for (let i = 0; i < choices.length; i++) {
+    const raw = String(choices[i] || '').trim()
+    if (/^[\+\*\✓\✔\★]/.test(raw) || /\[x\]/i.test(raw) || /\(correct\)/i.test(raw)) {
+      return i
+    }
+  }
 
   // -----------------------------------------------------------------
   // PRIORITY 1: Direct Key Extraction
@@ -169,12 +192,13 @@ export function repairQuizQuestions(questions: AIGeneratedQuestion[]): AIGenerat
     while (rawChoices.length < 4) {
       rawChoices.push(`Option ${String.fromCharCode(65 + rawChoices.length)}`)
     }
-    const choices = rawChoices.slice(0, 4).map(c => cleanOptionText(sanitizeText(c)))
-
-    let correctIdx = typeof q.correct_index === 'number' ? q.correct_index : 0
+    
+    let correctIdx = typeof q.correct_index === 'number' ? q.correct_index : -1
     if (correctIdx < 0 || correctIdx > 3 || isNaN(correctIdx)) {
-      correctIdx = resolveQuestionCorrectIndex(choices, String(q.correct_index ?? ''), q.explanation)
+      correctIdx = resolveQuestionCorrectIndex(rawChoices, String(q.correct_index ?? ''), q.explanation)
     }
+
+    const choices = rawChoices.slice(0, 4).map(c => cleanOptionText(sanitizeText(c)))
 
     return {
       prompt: sanitizeText(q.prompt) || `Question ${idx + 1}`,
@@ -194,7 +218,7 @@ export function repairQuizQuestions(questions: AIGeneratedQuestion[]): AIGenerat
  * Simple CSV Line Splitter supporting quoted strings and multiple delimiters (, ; \t)
  */
 function parseCSVLines(csvText: string): string[][] {
-  const cleanCsv = sanitizeText(csvText)
+  const cleanCsv = sanitizeRawSpreadsheetContent(csvText)
   const lines = cleanCsv.split(/\r?\n/).filter(line => line.trim().length > 0)
   if (!lines.length) return []
 
@@ -204,6 +228,10 @@ function parseCSVLines(csvText: string): string[][] {
   else if (firstLine.includes(';') && !firstLine.includes(',')) delim = ';'
 
   return lines.map(line => {
+    // If line has tabs, split by tab directly if not in quotes
+    if (line.includes('\t')) {
+      return line.split('\t').map(c => sanitizeText(c.replace(/^["']|["']$/g, '')))
+    }
     const row: string[] = []
     let inQuotes = false
     let currentToken = ''
@@ -225,27 +253,33 @@ function parseCSVLines(csvText: string): string[][] {
 }
 
 /**
- * Parses raw Excel/CSV spreadsheet content into structured AIGeneratedQuiz.
+ * Parses raw Excel/CSV/TSV spreadsheet content into structured AIGeneratedQuiz.
  */
 export function parseExcelOrCSVContent(content: string, filename: string = 'Imported Quiz'): AIGeneratedQuiz {
   const rows = parseCSVLines(content)
-  if (rows.length < 2) {
-    throw new Error('CSV spreadsheet must contain a header row and at least 1 question row.')
+  if (!rows || rows.length === 0) {
+    throw new Error('No spreadsheet rows found. Please upload a valid CSV/Excel or paste questions.')
   }
 
-  const header = rows[0].map(h => sanitizeText(h).toLowerCase())
+  const firstRow = rows[0].map(h => sanitizeText(h).toLowerCase())
+  const hasHeader = firstRow.some(h => 
+    h.includes('question') || h.includes('prompt') || h.includes('choice') || h.includes('option') || h.includes('q')
+  )
+
+  const header = hasHeader ? firstRow : []
+  const startIndex = hasHeader ? 1 : 0
   
   const qCol = header.findIndex(h => h.includes('question') || h.includes('prompt') || h.includes('title') || h === 'q')
-  const optACol = header.findIndex(h => h.includes('option a') || h.includes('choice a') || h === 'a' || h === 'option1')
-  const optBCol = header.findIndex(h => h.includes('option b') || h.includes('choice b') || h === 'b' || h === 'option2')
-  const optCCol = header.findIndex(h => h.includes('option c') || h.includes('choice c') || h === 'c' || h === 'option3')
-  const optDCol = header.findIndex(h => h.includes('option d') || h.includes('choice d') || h === 'd' || h === 'option4')
+  const optACol = header.findIndex(h => h.includes('option a') || h.includes('choice a') || h === 'a' || h.includes('option 1') || h.includes('option1') || h.includes('choice 1') || h.includes('choice1') || h.includes('opt 1') || h.includes('opt1') || h === '1' || h === 'ans 1')
+  const optBCol = header.findIndex(h => h.includes('option b') || h.includes('choice b') || h === 'b' || h.includes('option 2') || h.includes('option2') || h.includes('choice 2') || h.includes('choice2') || h.includes('opt 2') || h.includes('opt2') || h === '2' || h === 'ans 2')
+  const optCCol = header.findIndex(h => h.includes('option c') || h.includes('choice c') || h === 'c' || h.includes('option 3') || h.includes('option3') || h.includes('choice 3') || h.includes('choice3') || h.includes('opt 3') || h.includes('opt3') || h === '3' || h === 'ans 3')
+  const optDCol = header.findIndex(h => h.includes('option d') || h.includes('choice d') || h === 'd' || h.includes('option 4') || h.includes('option4') || h.includes('choice 4') || h.includes('choice4') || h.includes('opt 4') || h.includes('opt4') || h === '4' || h === 'ans 4')
   const keyCol = header.findIndex(h => h.includes('correct') || h.includes('answer') || h.includes('key') || h === 'ans')
   const expCol = header.findIndex(h => h.includes('explanation') || h.includes('rationale') || h.includes('desc') || h === 'exp')
 
   const parsedQuestions: AIGeneratedQuestion[] = []
 
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = startIndex; i < rows.length; i++) {
     const row = rows[i]
     if (!row || row.length < 2) continue
 
@@ -266,7 +300,7 @@ export function parseExcelOrCSVContent(content: string, filename: string = 'Impo
       rawKey = keyCol !== -1 ? row[keyCol] : ''
       explanation = expCol !== -1 ? row[expCol] : ''
     } else {
-      prompt = row[0] || `Question ${i}`
+      prompt = row[0] || `Question ${i + 1}`
       choiceA = row[1] || 'Option A'
       choiceB = row[2] || 'Option B'
       choiceC = row[3] || 'Option C'
@@ -276,7 +310,7 @@ export function parseExcelOrCSVContent(content: string, filename: string = 'Impo
     }
 
     if ((!choiceB || choiceB === choiceA) && choiceA.includes(',')) {
-      const splitChoices = choiceA.split(/[,;\n]/).map(c => cleanOptionText(sanitizeText(c)))
+      const splitChoices = choiceA.split(/[,;\n]/).map(c => sanitizeText(c))
       if (splitChoices.length >= 2) {
         choiceA = splitChoices[0] || 'Option A'
         choiceB = splitChoices[1] || 'Option B'
@@ -292,8 +326,8 @@ export function parseExcelOrCSVContent(content: string, filename: string = 'Impo
       choiceD || 'Option D'
     ]
 
-    const choices = rawChoices.map(c => cleanOptionText(sanitizeText(c)))
-    const correctIndex = resolveQuestionCorrectIndex(choices, rawKey, explanation)
+    const correctIndex = resolveQuestionCorrectIndex(rawChoices, rawKey, explanation)
+    const choices = rawChoices.map(cleanOptionText)
 
     parsedQuestions.push({
       prompt: sanitizeText(prompt),
