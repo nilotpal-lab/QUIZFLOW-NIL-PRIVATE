@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { getHostUser, logoutHostAsync, updateHostProfile, initAuthSync, type HostUser } from '@/quizflow/authStore'
-import { getSavedQuizzes, deleteSavedQuiz, saveQuizDraft, type SavedQuizItem } from '@/quizflow/quizStore'
+import { getSavedQuizzes, deleteSavedQuiz, purgeAllSavedQuizzes, saveQuizDraft, type SavedQuizItem } from '@/quizflow/quizStore'
 import { getSessionHistory, type SessionHistoryRecord } from '@/quizflow/historyStore'
 import { createSession } from '@/quizflow/sessionStore'
 import { generatePrintableWorksheet } from '@/quizflow/pdfGenerator'
@@ -140,9 +140,18 @@ export default function TeacherDashboard() {
   }
 
   const handleDeleteQuiz = (id: string) => {
-    if (confirm('Are you sure you want to delete this draft quiz?')) {
+    if (confirm('Are you sure you want to delete this draft quiz? It will be permanently removed from both local storage and cloud database.')) {
       deleteSavedQuiz(id)
       setAllQuizzes(getSavedQuizzes())
+    }
+  }
+
+  const handlePurgeAllDashboard = () => {
+    if (confirm('🚨 ARE YOU SURE? This will PERMANENTLY PURGE ALL saved quizzes and drafts from both LocalStorage and Supabase Cloud Database!')) {
+      purgeAllSavedQuizzes()
+      setAllQuizzes([])
+      setToastMsg('🗑️ All saved quizzes purged from LocalStorage and Cloud Database.')
+      setTimeout(() => setToastMsg(null), 4000)
     }
   }
 
@@ -282,6 +291,14 @@ export default function TeacherDashboard() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  onClick={handlePurgeAllDashboard}
+                  className="btn btn-md btn-press"
+                  style={{ background: 'var(--cherry)', color: '#fff', border: '3px solid var(--ink)', boxShadow: '3px 3px 0 var(--ink)', borderRadius: 12, padding: '10px 16px', fontSize: 13, fontWeight: 800 }}
+                  title="Purge all saved quizzes & drafts from LocalStorage & Supabase Cloud"
+                >
+                  🗑️ Purge All
+                </button>
                 <label className="btn btn-mint btn-md cursor-pointer btn-press" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 900, background: '#00E676', border: '3px solid var(--ink)', boxShadow: '3px 3px 0 var(--ink)', borderRadius: 12, padding: '10px 18px', color: 'var(--ink)', fontSize: 13, cursor: 'pointer' }}>
                   📊 Import Excel / CSV Quiz
                   <input

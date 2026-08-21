@@ -5,6 +5,16 @@ import { NextResponse } from 'next/server'
    Full Multilingual & Topic-Locked AI Engine
    ================================================================ */
 
+function sanitizeText(str: any): string {
+  if (str === null || str === undefined) return ''
+  return String(str)
+    .replace(/PK\x03\x04[^\n]*/g, '')
+    .replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F\uFFFD]/g, '')
+    .replace(/[\u0002\u0003\u0004\u0005]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 const LANGUAGE_SCRIPT_MAP: Record<string, string> = {
   Hindi: 'Devanagari script (हिंदी)',
   Marathi: 'Devanagari script (मराठी)',

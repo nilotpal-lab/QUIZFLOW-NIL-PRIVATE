@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { createSession } from '@/quizflow/sessionStore'
-import { getSavedQuizzes, saveQuizDraft, type SavedQuizItem } from '@/quizflow/quizStore'
+import { getSavedQuizzes, saveQuizDraft, deleteSavedQuiz, purgeAllSavedQuizzes, type SavedQuizItem } from '@/quizflow/quizStore'
 import { parseExcelOrCSVFile } from '@/quizflow/excelQuizParser'
 import type { AIGeneratedQuiz } from '@/quizflow/types'
 import { useRouter } from 'next/navigation'
@@ -57,6 +57,30 @@ export default function HostNewPage() {
       alert(`📊 Successfully imported "${importedQuiz.title}" with ${importedQuiz.questions.length} questions & 100% verified answer keys! Click '🚀 Host Now' below to launch.`)
     } catch (err: any) {
       alert(`⚠️ Excel Import Failed: ${err?.message || 'Invalid spreadsheet structure.'}`)
+    }
+  }
+
+  const handleDeleteQuiz = (id: string, title: string) => {
+    if (confirm(`Are you sure you want to delete "${title}"? This will permanently delete it from both local storage and cloud database.`)) {
+      deleteSavedQuiz(id)
+      const updated = getSavedQuizzes()
+      setSavedQuizzes(updated)
+      if (updated.length > 0) {
+        setSelectedQuiz(updated[0].quiz)
+        setSelectedKey(`saved_${updated[0].id}`)
+      } else {
+        setSelectedQuiz(null)
+        setSelectedKey('')
+      }
+    }
+  }
+
+  const handlePurgeAll = () => {
+    if (confirm('🚨 ARE YOU SURE? This will PERMANENTLY PURGE ALL saved quizzes and drafts from both LocalStorage and Supabase Cloud Database!')) {
+      purgeAllSavedQuizzes()
+      setSavedQuizzes([])
+      setSelectedQuiz(null)
+      setSelectedKey('')
     }
   }
 
@@ -240,6 +264,14 @@ export default function HostNewPage() {
                 📂 Your Saved Quizzes ({savedQuizzes.length})
               </h2>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  onClick={handlePurgeAll}
+                  className="btn btn-sm btn-press"
+                  style={{ background: 'var(--cherry)', color: '#fff', border: '2px solid var(--ink)', boxShadow: '2px 2px 0 var(--ink)', borderRadius: 10, padding: '6px 12px', fontSize: 12, fontWeight: 800 }}
+                  title="Purge all drafts from local storage & Supabase cloud"
+                >
+                  🗑️ Purge All
+                </button>
                 <label className="btn btn-sm btn-mint cursor-pointer btn-press" style={{ background: '#00E676', border: '2px solid var(--ink)', boxShadow: '2px 2px 0 var(--ink)', borderRadius: 10, padding: '6px 14px', color: 'var(--ink)', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
                   📊 Import Excel / CSV
                   <input
@@ -282,9 +314,21 @@ export default function HostNewPage() {
                         <span className={`badge ${item.isDraft ? 'badge-cherry' : 'badge-mint'}`} style={{ fontSize: 10 }}>
                           {item.isDraft ? '📝 Draft' : '✅ Saved'}
                         </span>
-                        <span style={{ fontSize: 11, color: '#666', fontFamily: 'Inter' }}>
-                          {item.quiz.questions?.length || 0} Qs
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 11, color: '#666', fontFamily: 'Inter' }}>
+                            {item.quiz.questions?.length || 0} Qs
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDeleteQuiz(item.id, item.title)
+                            }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, padding: '2px 4px' }}
+                            title="Delete quiz permanently from local & cloud database"
+                          >
+                            🗑️
+                          </button>
+                        </div>
                       </div>
                       <div style={{ fontFamily: 'Space Grotesk', fontSize: 17, fontWeight: 800, marginBottom: 4, color: 'var(--ink)' }}>
                         {item.title}

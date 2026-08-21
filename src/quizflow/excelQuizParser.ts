@@ -1,10 +1,5 @@
-/* ================================================================
-   QuizFlow — Excel & CSV Quiz Import & Universal Answer Key Engine
-   Parses 3 Excel/CSV formats, extracts options, resolves correct answer keys
-   via a 5-Tier Priority Cascade, and guarantees 100% accuracy.
-   ================================================================ */
-
 import type { AIGeneratedQuestion, AIGeneratedQuiz } from './types'
+import * as XLSX from 'xlsx'
 
 export interface RawExcelRow {
   question?: string
@@ -20,12 +15,26 @@ export interface RawExcelRow {
 }
 
 /**
+ * Strips non-printable ASCII, control characters (\x00-\x1F), replacement chars (\uFFFD),
+ * and ZIP archive headers (PK\x03\x04) to prevent text corruption from binary xlsx files.
+ */
+export function sanitizeText(str: any): string {
+  if (str === null || str === undefined) return ''
+  return String(str)
+    .replace(/PK\x03\x04[^\n]*/g, '')
+    .replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F\uFFFD]/g, '')
+    .replace(/[\u0002\u0003\u0004\u0005]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
  * Step 0: Strips leading option prefixes like "A.", "B)", "1.", "(A)", "Option A: "
  */
 export function cleanOptionText(text: string): string {
   if (!text) return ''
-  return text
-    .trim()
+  const clean = sanitizeText(text)
+  return clean
     .replace(/^[\(\[\{]?[A-Da-d1-4][\)\]\.\:\-]\s*/, '')
     .replace(/^(option|choice)\s+[A-Da-d1-4][\.\:]?\s*/i, '')
     .trim()
@@ -41,8 +50,8 @@ export function resolveQuestionCorrectIndex(
   explanationText?: string | null
 ): number {
   const cleanedChoices = choices.map(cleanOptionText)
-  const normKey = String(rawCorrectKey || '').trim()
-  const normExp = String(explanationText || '').trim()
+  const normKey = sanitizeText(rawCorrectKey)
+  const normExp = sanitizeText(explanationText)
 
   // -----------------------------------------------------------------
   // PRIORITY 1: Direct Key Extraction
@@ -79,16 +88,14 @@ export function resolveQuestionCorrectIndex(
 
   // -----------------------------------------------------------------
   // PRIORITY 2: Quoted Value Matching in Explanation
-  // e.g. "The correct answer is '20'" or "The correct answer is \"Amino acids\""
   // -----------------------------------------------------------------
   if (normExp) {
     const quotedMatches = normExp.match(/["'“«]([^"'”»]+)["'”»]/g)
     if (quotedMatches) {
       for (const rawQuoted of quotedMatches) {
-        const unquoted = rawQuoted.replace(/["'“«”»]/g, '').trim().toLowerCase()
+        const unquoted = sanitizeText(rawQuoted.replace(/["'“«”»]/g, '')).toLowerCase()
         if (!unquoted) continue
         
-        // Single letter inside quotes e.g. "B"
         if (/^[a-d]$/i.test(unquoted)) {
           return unquoted.charCodeAt(0) - 97
         }
@@ -105,42 +112,28 @@ export function resolveQuestionCorrectIndex(
 
   // -----------------------------------------------------------------
   // PRIORITY 3: Strict Word-Bounded Letter Syntax in Explanation
-  // e.g. "Option (B)", "choice C", "correct answer is B."
   // -----------------------------------------------------------------
   if (normExp) {
-    // 3a. Matches "option b", "choice c", "answer a"
     const p3a = normExp.match(/\b(?:option|choice|answer)\s+([a-d])\b/i)
-    if (p3a) {
-      return p3a[1].toLowerCase().charCodeAt(0) - 97
-    }
+    if (p3a) return p3a[1].toLowerCase().charCodeAt(0) - 97
 
-    // 3b. Matches "(A)", "(B)", "(C)", "(D)"
     const p3b = normExp.match(/\(([a-d])\)/i)
-    if (p3b) {
-      return p3b[1].toLowerCase().charCodeAt(0) - 97
-    }
+    if (p3b) return p3b[1].toLowerCase().charCodeAt(0) - 97
 
-    // 3c. Matches "correct answer is B." / "answer is C,"
     const p3c = normExp.match(/\bcorrect\s+answer\s+is\s+([a-d])(?:\.|\,|\;|\s|$)/i)
-    if (p3c) {
-      return p3c[1].toLowerCase().charCodeAt(0) - 97
-    }
+    if (p3c) return p3c[1].toLowerCase().charCodeAt(0) - 97
 
-    // 3d. Matches "is (B)" or "is B." at end
     const p3d = normExp.match(/\bis\s+([a-d])[\.\;]?$/i)
-    if (p3d) {
-      return p3d[1].toLowerCase().charCodeAt(0) - 97
-    }
+    if (p3d) return p3d[1].toLowerCase().charCodeAt(0) - 97
   }
 
   // -----------------------------------------------------------------
   // PRIORITY 4: Phrase Extraction After Key Terms in Explanation
-  // e.g. "Correct Answer: 20 amino acids" or "Answer is: Photosynthesis"
   // -----------------------------------------------------------------
   if (normExp) {
     const p4Match = normExp.match(/(?:correct\s+answer|answer\s+is|key\s+is)[\s\:\-]+([^\.\;\n]+)/i)
     if (p4Match) {
-      const phrase = p4Match[1].trim().toLowerCase()
+      const phrase = sanitizeText(p4Match[1]).toLowerCase()
       const phraseIdx = cleanedChoices.findIndex(c => c && (
         phrase.includes(c.toLowerCase()) || c.toLowerCase().includes(phrase)
       ))
@@ -164,7 +157,6 @@ export function resolveQuestionCorrectIndex(
     }
   }
 
-  // Fallback default: index 0
   return 0
 }
 
@@ -177,7 +169,7 @@ export function repairQuizQuestions(questions: AIGeneratedQuestion[]): AIGenerat
     while (rawChoices.length < 4) {
       rawChoices.push(`Option ${String.fromCharCode(65 + rawChoices.length)}`)
     }
-    const choices = rawChoices.slice(0, 4).map(cleanOptionText)
+    const choices = rawChoices.slice(0, 4).map(c => cleanOptionText(sanitizeText(c)))
 
     let correctIdx = typeof q.correct_index === 'number' ? q.correct_index : 0
     if (correctIdx < 0 || correctIdx > 3 || isNaN(correctIdx)) {
@@ -185,14 +177,14 @@ export function repairQuizQuestions(questions: AIGeneratedQuestion[]): AIGenerat
     }
 
     return {
-      prompt: q.prompt ? q.prompt.trim() : `Question ${idx + 1}`,
+      prompt: sanitizeText(q.prompt) || `Question ${idx + 1}`,
       choices,
       correct_index: Math.max(0, Math.min(3, correctIdx)),
       difficulty: q.difficulty || 'medium',
-      explanation: q.explanation || `The correct answer is Choice ${String.fromCharCode(65 + correctIdx)}.`,
+      explanation: sanitizeText(q.explanation) || `The correct answer is Choice ${String.fromCharCode(65 + correctIdx)}.`,
       time_limit_ms: q.time_limit_ms || 20000,
       bloom_level: q.bloom_level || 'Recall',
-      misconceptions: q.misconceptions || ['', '', '', ''],
+      misconceptions: (q.misconceptions || ['', '', '', '']).map(m => sanitizeText(m)),
       imageUrl: q.imageUrl || q.media_url || ''
     }
   })
@@ -202,10 +194,10 @@ export function repairQuizQuestions(questions: AIGeneratedQuestion[]): AIGenerat
  * Simple CSV Line Splitter supporting quoted strings and multiple delimiters (, ; \t)
  */
 function parseCSVLines(csvText: string): string[][] {
-  const lines = csvText.split(/\r?\n/).filter(line => line.trim().length > 0)
+  const cleanCsv = sanitizeText(csvText)
+  const lines = cleanCsv.split(/\r?\n/).filter(line => line.trim().length > 0)
   if (!lines.length) return []
 
-  // Determine delimiter
   const firstLine = lines[0]
   let delim = ','
   if (firstLine.includes('\t')) delim = '\t'
@@ -228,13 +220,12 @@ function parseCSVLines(csvText: string): string[][] {
       }
     }
     row.push(currentToken.trim())
-    return row.map(cell => cell.replace(/^["']|["']$/g, '').trim())
+    return row.map(cell => sanitizeText(cell.replace(/^["']|["']$/g, '')))
   })
 }
 
 /**
  * Parses raw Excel/CSV spreadsheet content into structured AIGeneratedQuiz.
- * Handles standard 7-column, key-value pair, and question + explanation formats.
  */
 export function parseExcelOrCSVContent(content: string, filename: string = 'Imported Quiz'): AIGeneratedQuiz {
   const rows = parseCSVLines(content)
@@ -242,9 +233,8 @@ export function parseExcelOrCSVContent(content: string, filename: string = 'Impo
     throw new Error('CSV spreadsheet must contain a header row and at least 1 question row.')
   }
 
-  const header = rows[0].map(h => h.toLowerCase().trim())
+  const header = rows[0].map(h => sanitizeText(h).toLowerCase())
   
-  // Find column indices
   const qCol = header.findIndex(h => h.includes('question') || h.includes('prompt') || h.includes('title') || h === 'q')
   const optACol = header.findIndex(h => h.includes('option a') || h.includes('choice a') || h === 'a' || h === 'option1')
   const optBCol = header.findIndex(h => h.includes('option b') || h.includes('choice b') || h === 'b' || h === 'option2')
@@ -267,7 +257,6 @@ export function parseExcelOrCSVContent(content: string, filename: string = 'Impo
     let rawKey = ''
     let explanation = ''
 
-    // Format 1 & 2: Header-based extraction
     if (qCol !== -1 && row[qCol]) {
       prompt = row[qCol]
       choiceA = optACol !== -1 ? row[optACol] : (row[1] || '')
@@ -277,7 +266,6 @@ export function parseExcelOrCSVContent(content: string, filename: string = 'Impo
       rawKey = keyCol !== -1 ? row[keyCol] : ''
       explanation = expCol !== -1 ? row[expCol] : ''
     } else {
-      // Positional fallback: Col 0 = Question, Col 1-4 = Choices, Col 5 = Key, Col 6 = Explanation
       prompt = row[0] || `Question ${i}`
       choiceA = row[1] || 'Option A'
       choiceB = row[2] || 'Option B'
@@ -287,9 +275,8 @@ export function parseExcelOrCSVContent(content: string, filename: string = 'Impo
       explanation = row[6] || ''
     }
 
-    // Format 3: Single Options Column (e.g. "A) Choice 1, B) Choice 2...")
     if ((!choiceB || choiceB === choiceA) && choiceA.includes(',')) {
-      const splitChoices = choiceA.split(/[,;\n]/).map(cleanOptionText)
+      const splitChoices = choiceA.split(/[,;\n]/).map(c => cleanOptionText(sanitizeText(c)))
       if (splitChoices.length >= 2) {
         choiceA = splitChoices[0] || 'Option A'
         choiceB = splitChoices[1] || 'Option B'
@@ -305,15 +292,15 @@ export function parseExcelOrCSVContent(content: string, filename: string = 'Impo
       choiceD || 'Option D'
     ]
 
-    const choices = rawChoices.map(cleanOptionText)
+    const choices = rawChoices.map(c => cleanOptionText(sanitizeText(c)))
     const correctIndex = resolveQuestionCorrectIndex(choices, rawKey, explanation)
 
     parsedQuestions.push({
-      prompt: prompt.trim(),
+      prompt: sanitizeText(prompt),
       choices,
       correct_index: correctIndex,
       difficulty: 'medium',
-      explanation: explanation ? explanation.trim() : `Correct answer: ${choices[correctIndex]}.`,
+      explanation: sanitizeText(explanation) || `Correct answer: ${choices[correctIndex]}.`,
       time_limit_ms: 20000,
       bloom_level: 'Recall'
     })
@@ -323,7 +310,7 @@ export function parseExcelOrCSVContent(content: string, filename: string = 'Impo
     throw new Error('No valid question rows could be extracted from the uploaded CSV/Excel file.')
   }
 
-  const cleanTitle = filename.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ')
+  const cleanTitle = sanitizeText(filename.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '))
 
   return {
     title: cleanTitle ? `${cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1)} Quiz` : 'Imported Excel Quiz',
@@ -335,9 +322,24 @@ export function parseExcelOrCSVContent(content: string, filename: string = 'Impo
 }
 
 /**
- * Reads File (.csv, .tsv, .txt, .xlsx) and returns parsed AIGeneratedQuiz.
+ * Reads File (.csv, .tsv, .txt, .xlsx, .xls) and returns parsed AIGeneratedQuiz.
+ * Uses SheetJS (XLSX) ArrayBuffer parsing for binary .xlsx / .xls files to avoid ZIP header corruption!
  */
 export async function parseExcelOrCSVFile(file: File): Promise<AIGeneratedQuiz> {
+  const ext = file.name.split('.').pop()?.toLowerCase() || ''
+  
+  if (ext === 'xlsx' || ext === 'xls') {
+    const buffer = await file.arrayBuffer()
+    const workbook = XLSX.read(buffer, { type: 'array' })
+    const sheetName = workbook.SheetNames[0]
+    if (!sheetName || !workbook.Sheets[sheetName]) {
+      throw new Error('Excel workbook contains no valid worksheets.')
+    }
+    const sheet = workbook.Sheets[sheetName]
+    const csvContent = XLSX.utils.sheet_to_csv(sheet)
+    return parseExcelOrCSVContent(csvContent, file.name)
+  }
+
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => {

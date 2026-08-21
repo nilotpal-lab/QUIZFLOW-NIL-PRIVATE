@@ -271,3 +271,29 @@ export async function syncCommunityQuizToSupabase(quizItem: any) {
   }
 }
 
+export async function deleteQuizFromSupabase(id: string) {
+  const client = getSupabaseClient()
+  if (!client || !id) return null
+  try {
+    const { data, error } = await client.from('quizzes').delete().eq('id', id)
+    if (error) console.warn('[Supabase Quiz Delete Warning]:', error.message)
+    return data
+  } catch (err) {
+    console.warn('[Supabase Quiz Delete Exception]:', err)
+    return null
+  }
+}
+
+export async function purgeQuizzesFromSupabase() {
+  const client = getSupabaseClient()
+  if (!client) return null
+  try {
+    const { data, error } = await client.from('quizzes').delete().neq('id', '__keep_none__')
+    if (error) console.warn('[Supabase Purge Quizzes Warning]:', error.message)
+    return data
+  } catch (err) {
+    console.warn('[Supabase Purge Quizzes Exception]:', err)
+    return null
+  }
+}
+
