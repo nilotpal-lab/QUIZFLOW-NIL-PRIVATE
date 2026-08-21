@@ -8,6 +8,7 @@ import { getSessionHistory, type SessionHistoryRecord } from '@/quizflow/history
 import { createSession } from '@/quizflow/sessionStore'
 import { generatePrintableWorksheet } from '@/quizflow/pdfGenerator'
 import { publishQuizToCommunity } from '@/quizflow/communityStore'
+import { parseExcelOrCSVFile } from '@/quizflow/excelQuizParser'
 
 function formatExactTime(ts?: number) {
   if (!ts) return 'N/A'
@@ -117,6 +118,20 @@ export default function TeacherDashboard() {
     setAllQuizzes(getSavedQuizzes())
     setToastMsg('🌐 Published to Global Community Library! Visible to all users.')
     setTimeout(() => setToastMsg(null), 4000)
+  }
+
+  const handleExcelImportDashboard = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const importedQuiz = await parseExcelOrCSVFile(file)
+      saveQuizDraft(importedQuiz, false)
+      setAllQuizzes(getSavedQuizzes())
+      setToastMsg(`📊 Imported "${importedQuiz.title}" with ${importedQuiz.questions.length} questions & 100% verified answer keys!`)
+      setTimeout(() => setToastMsg(null), 5000)
+    } catch (err: any) {
+      alert(`⚠️ Excel Import Failed: ${err?.message || 'Invalid spreadsheet structure.'}`)
+    }
   }
 
   const handleLogout = async () => {
@@ -257,17 +272,26 @@ export default function TeacherDashboard() {
         {/* TAB 1: ALL QUIZZES (drafts + library-ready) */}
         {activeTab === 'quizzes' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
               <div>
                 <h2 style={{ fontFamily: 'Space Grotesk', fontSize: 24, fontWeight: 900, color: 'var(--ink)' }}>
                   📝 My Quizzes
                 </h2>
                 <div style={{ fontSize: 13, color: '#555', fontFamily: 'Inter' }}>
-                  All quizzes saved in Studio. Click 🌐 Publish Global to share any quiz to the global library.
+                  Create via AI Studio, upload directly from Excel / CSV, or host games instantly.
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <Link href="/quizflow/practice"><button className="btn btn-violet btn-md">🌐 Browse Community Library</button></Link>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <label className="btn btn-mint btn-md cursor-pointer btn-press" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 900, background: '#00E676', border: '3px solid var(--ink)', boxShadow: '3px 3px 0 var(--ink)', borderRadius: 12, padding: '10px 18px', color: 'var(--ink)', fontSize: 13, cursor: 'pointer' }}>
+                  📊 Import Excel / CSV Quiz
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls,.tsv,.txt"
+                    onChange={handleExcelImportDashboard}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+                <Link href="/quizflow/practice"><button className="btn btn-violet btn-md">🌐 Browse Community</button></Link>
                 <Link href="/quizflow/studio"><button className="btn btn-sun btn-md">✨ Create in Studio →</button></Link>
               </div>
             </div>

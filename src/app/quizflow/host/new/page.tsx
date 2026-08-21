@@ -2,7 +2,8 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { createSession } from '@/quizflow/sessionStore'
-import { getSavedQuizzes, type SavedQuizItem } from '@/quizflow/quizStore'
+import { getSavedQuizzes, saveQuizDraft, type SavedQuizItem } from '@/quizflow/quizStore'
+import { parseExcelOrCSVFile } from '@/quizflow/excelQuizParser'
 import type { AIGeneratedQuiz } from '@/quizflow/types'
 import { useRouter } from 'next/navigation'
 
@@ -41,6 +42,22 @@ export default function HostNewPage() {
   const handleStart = () => {
     if (!selectedQuiz) return
     launchQuiz(selectedQuiz)
+  }
+
+  const handleExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const importedQuiz = await parseExcelOrCSVFile(file)
+      saveQuizDraft(importedQuiz, false)
+      const updated = getSavedQuizzes()
+      setSavedQuizzes(updated)
+      setSelectedQuiz(importedQuiz)
+      setSelectedKey(`saved_${updated[0]?.id || Date.now()}`)
+      alert(`📊 Successfully imported "${importedQuiz.title}" with ${importedQuiz.questions.length} questions & 100% verified answer keys! Click '🚀 Host Now' below to launch.`)
+    } catch (err: any) {
+      alert(`⚠️ Excel Import Failed: ${err?.message || 'Invalid spreadsheet structure.'}`)
+    }
   }
 
   return (
@@ -165,19 +182,77 @@ export default function HostNewPage() {
               </div>
             </Link>
 
+            {/* OPTION 3: IMPORT EXCEL / CSV */}
+            <label style={{ textDecoration: 'none', cursor: 'pointer', display: 'block' }}>
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls,.tsv,.txt"
+                onChange={handleExcelImport}
+                style={{ display: 'none' }}
+              />
+              <div
+                className="btn-press card"
+                style={{
+                  padding: 24,
+                  border: '3px solid var(--ink)',
+                  borderRadius: 18,
+                  background: '#00E676',
+                  boxShadow: '5px 5px 0px #10100F',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  height: '100%',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <span className="badge badge-ink" style={{ fontSize: 11 }}>📊 SPREADSHEET IMPORT</span>
+                    <span style={{ fontSize: 28 }}>📊</span>
+                  </div>
+                  <div style={{ fontFamily: 'Space Grotesk', fontSize: 22, fontWeight: 900, color: 'var(--ink)', marginBottom: 8 }}>
+                    Import Excel / CSV
+                  </div>
+                  <p style={{ fontFamily: 'Inter', fontSize: 13.5, color: 'var(--ink)', opacity: 0.85, lineHeight: 1.5, marginBottom: 18 }}>
+                    Upload any Excel (.xlsx, .csv) spreadsheet. QuizFlow automatically extracts questions, choices (A, B, C, D), and green answer keys.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '2px solid var(--ink)', paddingTop: 14 }}>
+                  <span style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 14, color: 'var(--ink)' }}>
+                    Upload Spreadsheet
+                  </span>
+                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'white', border: '2px solid var(--ink)', display: 'grid', placeItems: 'center', fontWeight: 900 }}>
+                    →
+                  </div>
+                </div>
+              </div>
+            </label>
+
           </div>
         </div>
 
         {/* SECTION 1: YOUR SAVED & CREATED QUIZZES */}
         {savedQuizzes.length > 0 && (
           <div style={{ marginBottom: 36 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
               <h2 style={{ fontFamily: 'Space Grotesk', fontSize: 20, fontWeight: 800, color: 'var(--ink)' }}>
                 📂 Your Saved Quizzes ({savedQuizzes.length})
               </h2>
-              <Link href="/quizflow/studio">
-                <button className="btn btn-sm btn-violet" style={{ fontSize: 12 }}>✨ + Create in Studio</button>
-              </Link>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <label className="btn btn-sm btn-mint cursor-pointer btn-press" style={{ background: '#00E676', border: '2px solid var(--ink)', boxShadow: '2px 2px 0 var(--ink)', borderRadius: 10, padding: '6px 14px', color: 'var(--ink)', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
+                  📊 Import Excel / CSV
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls,.tsv,.txt"
+                    onChange={handleExcelImport}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+                <Link href="/quizflow/studio">
+                  <button className="btn btn-sm btn-violet" style={{ fontSize: 12 }}>✨ + Create in Studio</button>
+                </Link>
+              </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
