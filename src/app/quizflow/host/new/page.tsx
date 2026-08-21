@@ -8,6 +8,19 @@ import type { AIGeneratedQuiz } from '@/quizflow/types'
 import { useRouter } from 'next/navigation'
 
 
+function formatExactTime(ts?: number) {
+  if (!ts) return 'N/A'
+  return new Date(ts).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  })
+}
+
 export default function HostNewPage() {
   const router = useRouter()
   const [savedQuizzes, setSavedQuizzes] = useState<SavedQuizItem[]>([])
@@ -15,6 +28,14 @@ export default function HostNewPage() {
   const [selectedKey, setSelectedKey] = useState<string>('')
   const [gameMode, setGameModeState] = useState<'classic' | 'boss_raid' | 'tournament'>('classic')
   const [creating, setCreating] = useState(false)
+  const [previewQuiz, setPreviewQuiz] = useState<AIGeneratedQuiz | null>(null)
+
+  const handleEditQuizInStudio = (item: SavedQuizItem) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('quizflow_edit_draft', JSON.stringify(item.quiz))
+      router.push('/quizflow/studio')
+    }
+  }
 
   useEffect(() => {
     const saved = getSavedQuizzes()
@@ -260,9 +281,9 @@ export default function HostNewPage() {
         {savedQuizzes.length > 0 && (
           <div style={{ marginBottom: 36 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
-              <h2 style={{ fontFamily: 'Space Grotesk', fontSize: 20, fontWeight: 800, color: 'var(--ink)' }}>
-                📂 Your Saved Quizzes ({savedQuizzes.length})
-              </h2>
+              <div style={{ fontFamily: 'Space Grotesk', fontSize: 13, fontWeight: 900, color: '#888', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                ✅ LIBRARY-READY QUIZZES ({savedQuizzes.length}) — PUBLISHED OR PRESET, READY TO HOST
+              </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <button
                   onClick={handlePurgeAll}
@@ -287,76 +308,167 @@ export default function HostNewPage() {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-              {savedQuizzes.map((item) => {
-                const isSelected = selectedKey === `saved_${item.id}`
-                return (
-                  <div
-                    key={item.id}
-                    onClick={() => {
-                      setSelectedQuiz(item.quiz)
-                      setSelectedKey(`saved_${item.id}`)
-                    }}
-                    style={{
-                      textAlign: 'left', padding: 20,
-                      border: '2px solid var(--ink)',
-                      borderRadius: 16,
-                      background: isSelected ? 'var(--sun)' : 'var(--paper)',
-                      boxShadow: isSelected ? '5px 5px 0 var(--ink)' : '3px 3px 0 var(--ink)',
-                      transform: isSelected ? 'translate(-2px,-2px)' : 'none',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                      display: 'flex', flexDirection: 'column', justifyContent: 'space-between'
-                    }}
-                  >
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <span className={`badge ${item.isDraft ? 'badge-cherry' : 'badge-mint'}`} style={{ fontSize: 10 }}>
-                          {item.isDraft ? '📝 Draft' : '✅ Saved'}
-                        </span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 11, color: '#666', fontFamily: 'Inter' }}>
-                            {item.quiz.questions?.length || 0} Qs
-                          </span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDeleteQuiz(item.id, item.title)
-                            }}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, padding: '2px 4px' }}
-                            title="Delete quiz permanently from local & cloud database"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      </div>
-                      <div style={{ fontFamily: 'Space Grotesk', fontSize: 17, fontWeight: 800, marginBottom: 4, color: 'var(--ink)' }}>
-                        {item.title}
-                      </div>
-                      <div style={{ color: '#555', fontSize: 12, fontFamily: 'Inter', marginBottom: 14, lineHeight: 1.4 }}>
-                        {item.description || 'AI Created Quiz'}
-                      </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 20 }}>
+              {savedQuizzes.map((item) => (
+                <div
+                  key={item.id}
+                  className="card"
+                  style={{
+                    padding: '22px 24px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    border: '3px solid var(--ink)',
+                    borderRadius: 22,
+                    background: 'var(--paper)',
+                    boxShadow: '5px 5px 0 var(--ink)'
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <span
+                        style={{
+                          background: item.isDraft ? 'var(--cherry)' : '#00E676',
+                          color: item.isDraft ? '#fff' : '#10100F',
+                          padding: '4px 10px',
+                          borderRadius: 8,
+                          fontSize: 11,
+                          fontWeight: 900,
+                          fontFamily: 'Space Grotesk',
+                          textTransform: 'uppercase',
+                          border: '2px solid var(--ink)'
+                        }}
+                      >
+                        {item.isDraft ? '📝 DRAFT' : '✅ READY'}
+                      </span>
+                      <span style={{ fontSize: 11, color: '#666', fontFamily: 'Inter', fontWeight: 600 }}>
+                        Updated {formatExactTime(item.updatedAt)}
+                      </span>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1.5px solid var(--ink)', paddingTop: 12 }}>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <span className="badge badge-ink" style={{ fontSize: 10 }}>{item.language || 'English'}</span>
-                        <span className="badge badge-sky" style={{ fontSize: 10 }}>{item.bloomLevel || 'Recall'}</span>
-                      </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                      <h3 style={{ fontFamily: 'Space Grotesk', fontSize: 19, fontWeight: 900, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                        {item.title}
+                      </h3>
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          launchQuiz(item.quiz)
-                        }}
-                        className="btn btn-sm btn-primary"
-                        style={{ padding: '4px 12px', fontSize: 12 }}
+                        onClick={() => setPreviewQuiz(item.quiz)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 700, color: '#555' }}
+                        title="Quick preview questions"
                       >
-                        🚀 Host Now
+                        👁 Preview
                       </button>
                     </div>
+
+                    <p style={{ fontSize: 13, color: '#666', fontFamily: 'Inter', marginBottom: 14, lineHeight: 1.4 }}>
+                      {item.description || 'Interactive live quiz ready to host'}
+                    </p>
+
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+                      <span style={{ background: '#10100F', color: '#FFF', padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 900, textTransform: 'uppercase', fontFamily: 'Space Grotesk' }}>
+                        {item.quiz.questions?.length || 0} QUESTIONS
+                      </span>
+                      <span style={{ background: '#38BDF8', color: '#10100F', border: '2px solid #10100F', padding: '3px 12px', borderRadius: 20, fontSize: 11, fontWeight: 900, textTransform: 'uppercase', fontFamily: 'Space Grotesk' }}>
+                        {item.language || 'ENGLISH'}
+                      </span>
+                      <span style={{ background: '#A78BFA', color: '#FFF', border: '2px solid #10100F', padding: '3px 12px', borderRadius: 20, fontSize: 11, fontWeight: 900, textTransform: 'uppercase', fontFamily: 'Space Grotesk' }}>
+                        {item.bloomLevel || 'RECALL'}
+                      </span>
+                    </div>
                   </div>
-                )
-              })}
+
+                  {/* 2x2 Action Buttons Layout */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, borderTop: '2px solid var(--ink)', paddingTop: 16 }}>
+                    <button
+                      onClick={() => launchQuiz(item.quiz)}
+                      className="btn-press"
+                      style={{
+                        background: '#FFD54F',
+                        color: '#10100F',
+                        border: '2.5px solid #10100F',
+                        boxShadow: '3px 3px 0 #10100F',
+                        borderRadius: 12,
+                        padding: '10px 0',
+                        fontSize: 13,
+                        fontWeight: 900,
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6
+                      }}
+                    >
+                      🚀 Host Game
+                    </button>
+                    <button
+                      onClick={() => setPreviewQuiz(item.quiz)}
+                      className="btn-press"
+                      style={{
+                        background: 'var(--paper)',
+                        color: '#10100F',
+                        border: '2.5px solid #10100F',
+                        boxShadow: '3px 3px 0 #10100F',
+                        borderRadius: 12,
+                        padding: '10px 0',
+                        fontSize: 13,
+                        fontWeight: 900,
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6
+                      }}
+                    >
+                      👁 Preview
+                    </button>
+                    <button
+                      onClick={() => handleEditQuizInStudio(item)}
+                      className="btn-press"
+                      style={{
+                        background: 'var(--paper)',
+                        color: '#10100F',
+                        border: '2.5px solid #10100F',
+                        boxShadow: '3px 3px 0 #10100F',
+                        borderRadius: 12,
+                        padding: '10px 0',
+                        fontSize: 13,
+                        fontWeight: 900,
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6
+                      }}
+                    >
+                      ✏️ Edit Studio
+                    </button>
+                    <button
+                      onClick={() => handleDeleteQuiz(item.id, item.title)}
+                      className="btn-press"
+                      style={{
+                        background: '#FFF',
+                        color: '#E53935',
+                        border: '2.5px solid #E53935',
+                        boxShadow: '3px 3px 0 rgba(229,57,53,0.3)',
+                        borderRadius: 12,
+                        padding: '10px 0',
+                        fontSize: 13,
+                        fontWeight: 900,
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6
+                      }}
+                    >
+                      🗑️ Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -542,6 +654,147 @@ export default function HostNewPage() {
             </div>
           )}
         </div>
+
+        {/* QUESTION PREVIEW MODAL */}
+        {previewQuiz && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(16, 16, 15, 0.75)',
+              backdropFilter: 'blur(6px)',
+              zIndex: 9999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 20
+            }}
+            onClick={() => setPreviewQuiz(null)}
+          >
+            <div
+              className="card anim-scale-in"
+              style={{
+                maxWidth: 720,
+                width: '100%',
+                maxHeight: '85vh',
+                display: 'flex',
+                flexDirection: 'column',
+                background: 'var(--paper)',
+                border: '3px solid var(--ink)',
+                borderRadius: 24,
+                boxShadow: '8px 8px 0 var(--ink)',
+                overflow: 'hidden'
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div style={{ padding: '20px 24px', borderBottom: '3px solid var(--ink)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#FFFCF5' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ background: '#00E676', color: '#10100F', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 900, fontFamily: 'Space Grotesk' }}>
+                      👁 PREVIEW
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#666' }}>
+                      {previewQuiz.questions?.length || 0} Questions
+                    </span>
+                  </div>
+                  <h2 style={{ fontFamily: 'Space Grotesk', fontSize: 20, fontWeight: 900, color: 'var(--ink)' }}>
+                    {previewQuiz.title}
+                  </h2>
+                </div>
+                <button
+                  onClick={() => setPreviewQuiz(null)}
+                  style={{ background: '#FFF', border: '2px solid var(--ink)', borderRadius: 10, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 900, cursor: 'pointer' }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Questions Scrollable List */}
+              <div style={{ padding: '20px 24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {previewQuiz.questions?.map((q, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      background: '#FFF',
+                      border: '2px solid var(--ink)',
+                      borderRadius: 14,
+                      padding: '16px 18px',
+                      boxShadow: '3px 3px 0 var(--ink)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+                      <div style={{ fontFamily: 'Space Grotesk', fontSize: 14, fontWeight: 900, color: 'var(--ink)' }}>
+                        <span style={{ background: 'var(--sun)', padding: '2px 6px', borderRadius: 6, marginRight: 8, fontSize: 11 }}>Q{idx + 1}</span>
+                        {q.prompt}
+                      </div>
+                      <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', background: '#F1F5F9', padding: '2px 8px', borderRadius: 12, border: '1px solid #CBD5E1' }}>
+                        {q.difficulty || 'Medium'}
+                      </span>
+                    </div>
+
+                    {/* Choices */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                      {q.choices.map((choice, cIdx) => {
+                        const isCorrect = cIdx === q.correct_index
+                        return (
+                          <div
+                            key={cIdx}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: 8,
+                              fontSize: 12,
+                              fontFamily: 'Inter',
+                              fontWeight: isCorrect ? 800 : 500,
+                              background: isCorrect ? '#D6FFF4' : '#F8FAFC',
+                              border: isCorrect ? '2px solid #00E676' : '1.5px solid #E2E8F0',
+                              color: isCorrect ? '#007A3D' : '#334155',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6
+                            }}
+                          >
+                            <span style={{ fontWeight: 900 }}>{String.fromCharCode(65 + cIdx)}.</span>
+                            <span>{choice}</span>
+                            {isCorrect && <span style={{ marginLeft: 'auto', fontSize: 13 }}>✓</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {q.explanation && (
+                      <div style={{ fontSize: 11, color: '#64748B', fontFamily: 'Inter', background: '#F8FAFC', padding: '6px 10px', borderRadius: 6, borderLeft: '3px solid #00E676' }}>
+                        💡 <strong>Explanation:</strong> {q.explanation}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Modal Footer */}
+              <div style={{ padding: '16px 24px', borderTop: '2px solid var(--ink)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#FFFCF5' }}>
+                <button
+                  onClick={() => setPreviewQuiz(null)}
+                  className="btn btn-sm"
+                  style={{ background: 'var(--paper)', border: '2px solid var(--ink)', borderRadius: 10, fontWeight: 800 }}
+                >
+                  Close Preview
+                </button>
+                <button
+                  onClick={() => {
+                    const q = previewQuiz
+                    setPreviewQuiz(null)
+                    launchQuiz(q)
+                  }}
+                  className="btn btn-sun btn-sm"
+                  style={{ fontWeight: 900 }}
+                >
+                  🚀 Host This Quiz Now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>
