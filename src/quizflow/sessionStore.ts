@@ -7,6 +7,7 @@
 
 import type { AIGeneratedQuiz } from './types'
 import { safeGetLocalStorage, safeSetLocalStorage, safeGetSessionStorage, safeSetSessionStorage } from './utils'
+import { repairQuizQuestions } from './excelQuizParser'
 
 export type GameStatus =
   | 'lobby'           // Waiting for host to start
@@ -964,7 +965,11 @@ export function shuffleQuizChoices(quiz: AIGeneratedQuiz): AIGeneratedQuiz {
 
 export function createSession(quiz: AIGeneratedQuiz, hostId: string, gameMode: GameMode = 'classic'): GameState {
   const pin = String(Math.floor(100000 + Math.random() * 900000))
-  const shuffledQuiz = shuffleQuizChoices(quiz)
+  const repairedQuiz: AIGeneratedQuiz = {
+    ...quiz,
+    questions: repairQuizQuestions(quiz.questions || [])
+  }
+  const shuffledQuiz = shuffleQuizChoices(repairedQuiz)
   const effectiveHostId = hostId || ('host_' + Date.now() + '_' + Math.random().toString(36).slice(2))
   const state: GameState = {
     pin,

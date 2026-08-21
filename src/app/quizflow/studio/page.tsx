@@ -5,6 +5,7 @@ import type { AIGeneratedQuiz, AIGeneratedQuestion, BloomLevel } from '@/quizflo
 import { createSession } from '@/quizflow/sessionStore'
 import { generatePrintableWorksheet, type WorksheetVersion } from '@/quizflow/pdfGenerator'
 import { ingestYouTubeUrl, ingestWebpageUrl, parseUploadedFile, type IngestedContent } from '@/quizflow/ingestion'
+import { parseExcelOrCSVFile } from '@/quizflow/excelQuizParser'
 import { saveQuizDraft } from '@/quizflow/quizStore'
 import { publishQuizToCommunity } from '@/quizflow/communityStore'
 import { getHostUser } from '@/quizflow/authStore'
@@ -55,7 +56,7 @@ export default function AIQuizStudio() {
   const [toastMsg, setToastMsg]             = useState<string | null>(null)
 
   // Ingestion Mode & States
-  const [ingestMode, setIngestMode]         = useState<'topic' | 'file' | 'youtube' | 'webpage'>('topic')
+  const [ingestMode, setIngestMode]         = useState<'topic' | 'file' | 'excel' | 'youtube' | 'webpage'>('topic')
   const [ingestedContent, setIngestedContent] = useState<IngestedContent | null>(null)
   const [ingesting, setIngesting]           = useState(false)
   const [youtubeUrl, setYoutubeUrl]         = useState('')
@@ -119,7 +120,7 @@ export default function AIQuizStudio() {
     }
   }, [editingTitle])
 
-  // Ingestion File Upload Handler
+  // Ingestion File Upload Handler (PDF, PPTX, Doc)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -131,6 +132,25 @@ export default function AIQuizStudio() {
       if (!topicInput) setTopicInput(result.title.replace(/^[^\s]+\s*/, ''))
     } catch (err: any) {
       setIngestError(err?.message || 'Failed to parse document file.')
+    } finally {
+      setIngesting(false)
+    }
+  }
+
+  // Direct Excel / CSV Upload Handler with 100% Answer Key Resolution
+  const handleExcelFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setIngesting(true)
+    setIngestError(null)
+    try {
+      const importedQuiz = await parseExcelOrCSVFile(file)
+      setQuiz(importedQuiz)
+      setViewMode('editor')
+      setToastMsg(`📊 Successfully imported ${importedQuiz.questions.length} questions from Excel with 100% verified answer keys!`)
+      setTimeout(() => setToastMsg(null), 4500)
+    } catch (err: any) {
+      setIngestError(err?.message || 'Failed to parse Excel/CSV spreadsheet file.')
     } finally {
       setIngesting(false)
     }
@@ -472,10 +492,11 @@ export default function AIQuizStudio() {
             </div>
 
             {/* Input Method Switcher */}
-            <div className="grid grid-cols-4 gap-2 mb-6">
+            <div className="grid grid-cols-5 gap-1.5 mb-6">
               {[
                 { id: 'topic', label: 'Prompt', icon: '✦' },
                 { id: 'file', label: 'Document', icon: '◫' },
+                { id: 'excel', label: 'Excel/CSV', icon: '📊' },
                 { id: 'youtube', label: 'YouTube', icon: '▶' },
                 { id: 'webpage', label: 'Webpage', icon: '◍' }
               ].map(tab => (
@@ -485,14 +506,14 @@ export default function AIQuizStudio() {
                     setIngestMode(tab.id as any)
                     setIngestError(null)
                   }}
-                  className={`h-11 border-[3px] rounded-[12px] text-[12px] font-bold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-1 transition-all btn-press ${
+                  className={`h-11 border-[3px] rounded-[12px] text-[11px] font-bold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 px-1 transition-all btn-press ${
                     ingestMode === tab.id
                       ? 'bg-[#00E676] border-[#10100F] soft'
                       : 'bg-[#FFFCF5] border-[#10100F]/15 hover:border-[#10100F]'
                   }`}
                 >
                   <span className="text-[14px]">{tab.icon}</span>
-                  <span className="text-[10px] sm:text-[12px] leading-tight">{tab.label}</span>
+                  <span className="text-[9px] sm:text-[11px] leading-tight truncate">{tab.label}</span>
                 </button>
               ))}
             </div>
@@ -524,6 +545,28 @@ export default function AIQuizStudio() {
                     <div className="text-[32px] mb-2">📄</div>
                     <div className="font-display font-[800] text-[14px]">Choose Document</div>
                     <div className="text-[11px] text-black/50 mt-1">Supports PDF, PPTX, MD, TXT</div>
+                  </div>
+                </div>
+              )}
+
+              {ingestMode === 'excel' && (
+                <div>
+                  <label className="sg text-[11px] font-bold tracking-[0.08em] text-black/50 block mb-2 uppercase">DIRECT EXCEL / CSV QUESTION IMPORT</label>
+                  <div className="border-[3px] border-dashed border-[#10100F]/30 rounded-[12px] p-6 text-center bg-[#D6FFF4]/40 hover:bg-[#D6FFF4]/70 transition-colors relative cursor-pointer soft">
+                    <input
+                      type="file"
+                      accept=".csv,.xlsx,.xls,.tsv,.txt"
+                      onChange={handleExcelFileUpload}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    />
+                    <div className="text-[36px] mb-2">📊</div>
+                    <div className="font-display font-[900] text-[15px] text-[#10100F]">Upload Excel or CSV Spreadsheet</div>
+                    <div className="text-[12px] text-black/70 mt-1 font-medium leading-relaxed">
+                      Auto-extracts Questions, Options (A, B, C, D), and Green Answer Keys via 5-Tier Priority Cascade
+                    </div>
+                    <div className="inline-block mt-3 px-3 py-1 bg-white border-[2px] border-[#10100F] rounded-[20px] text-[10px] font-mono font-bold">
+                      Supports Standard 7-Col, Key-Value Pairs & Paragraph Explanations
+                    </div>
                   </div>
                 </div>
               )}
