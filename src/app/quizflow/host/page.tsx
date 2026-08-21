@@ -40,7 +40,7 @@ function TeacherHostDashboard() {
   const [activeBoard, setActiveBoard]       = useState<'tactics' | 'mastery'>('tactics')
   const [showLeaderboardModal, setShowLeaderboardModal] = useState(false)
   const [revealedIndex, setRevealedIndex]   = useState<number | null>(null)
-  const [autoPacing, setAutoPacing]         = useState(true)
+  const [autoPacing, setAutoPacing]         = useState(false)
   const [isProjectorMode, setIsProjectorMode] = useState(false)
   const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null)
   const [sessionTimeout, setSessionTimeout] = useState(false)
