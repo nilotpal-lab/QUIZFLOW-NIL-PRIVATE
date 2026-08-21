@@ -216,9 +216,10 @@ export function repairQuizQuestions(questions: AIGeneratedQuestion[]): AIGenerat
 }
 
 /**
- * Simple CSV Line Splitter supporting quoted strings and multiple delimiters (, ; \t)
+ * Simple CSV Line Splitter supporting double-quoted strings (RFC 4180) and multiple delimiters (, ; \t)
+ * Does NOT treat single quotes (') as quote delimiters so English apostrophes are preserved!
  */
-function parseCSVLines(csvText: string): string[][] {
+export function parseCSVLines(csvText: string): string[][] {
   const cleanCsv = sanitizeRawSpreadsheetContent(csvText)
   const lines = cleanCsv.split(/\r?\n/).filter(line => line.trim().length > 0)
   if (!lines.length) return []
@@ -229,9 +230,9 @@ function parseCSVLines(csvText: string): string[][] {
   else if (firstLine.includes(';') && !firstLine.includes(',')) delim = ';'
 
   return lines.map(line => {
-    // If line has tabs, split by tab directly if not in quotes
-    if (line.includes('\t')) {
-      return line.split('\t').map(c => sanitizeText(c.replace(/^["']|["']$/g, '')))
+    // If line has tabs, split by tab directly
+    if (delim === '\t' && line.includes('\t')) {
+      return line.split('\t').map(c => sanitizeText(c.replace(/^"|"$/g, '')))
     }
     const row: string[] = []
     let inQuotes = false
@@ -239,7 +240,7 @@ function parseCSVLines(csvText: string): string[][] {
 
     for (let i = 0; i < line.length; i++) {
       const char = line[i]
-      if (char === '"' || char === "'") {
+      if (char === '"') {
         inQuotes = !inQuotes
       } else if (char === delim && !inQuotes) {
         row.push(currentToken.trim())
@@ -249,28 +250,34 @@ function parseCSVLines(csvText: string): string[][] {
       }
     }
     row.push(currentToken.trim())
-    return row.map(cell => sanitizeText(cell.replace(/^["']|["']$/g, '')))
+    return row.map(cell => sanitizeText(cell.replace(/^"|"$/g, '')))
   })
 }
 
 /**
- * Parses raw Excel/CSV/TSV spreadsheet content into structured AIGeneratedQuiz.
+ * Universal Core Spreadsheet Parser: Processes any 2D row array into structured AIGeneratedQuiz.
  */
-export function parseExcelOrCSVContent(content: string, filename: string = 'Imported Quiz'): AIGeneratedQuiz {
-  const rows = parseCSVLines(content)
+export function parseSpreadsheetRows(rawRows: any[][], filename: string = 'Imported Quiz'): AIGeneratedQuiz {
+  const rows = (rawRows || [])
+    .map(row => (row || []).map(c => sanitizeText(c)))
+    .filter(row => row.some(cell => cell.length > 0))
+
   if (!rows || rows.length === 0) {
-    throw new Error('No spreadsheet rows found. Please upload a valid CSV/Excel or paste questions.')
+    throw new Error('No spreadsheet rows found. Please upload a valid CSV/Excel file or paste questions.')
   }
 
   const firstRow = rows[0].map(h => sanitizeText(h).toLowerCase())
+  
+  // Stricter Header Detection (do not match partial words like "sequence" or "quaternary")
   const hasHeader = firstRow.some(h => 
-    h.includes('question') || h.includes('prompt') || h.includes('choice') || h.includes('option') || h.includes('q')
+    h === 'question' || h.startsWith('question') || h.startsWith('prompt') || 
+    h.startsWith('choice') || h.startsWith('option') || h === 'q' || h === 'title'
   )
 
   const header = hasHeader ? firstRow : []
   const startIndex = hasHeader ? 1 : 0
   
-  const qCol = header.findIndex(h => h.includes('question') || h.includes('prompt') || h.includes('title') || h === 'q')
+  const qCol = header.findIndex(h => h.startsWith('question') || h.startsWith('prompt') || h.startsWith('title') || h === 'q')
   const optACol = header.findIndex(h => h.includes('option a') || h.includes('choice a') || h === 'a' || h.includes('option 1') || h.includes('option1') || h.includes('choice 1') || h.includes('choice1') || h.includes('opt 1') || h.includes('opt1') || h === '1' || h === 'ans 1')
   const optBCol = header.findIndex(h => h.includes('option b') || h.includes('choice b') || h === 'b' || h.includes('option 2') || h.includes('option2') || h.includes('choice 2') || h.includes('choice2') || h.includes('opt 2') || h.includes('opt2') || h === '2' || h === 'ans 2')
   const optCCol = header.findIndex(h => h.includes('option c') || h.includes('choice c') || h === 'c' || h.includes('option 3') || h.includes('option3') || h.includes('choice 3') || h.includes('choice3') || h.includes('opt 3') || h.includes('opt3') || h === '3' || h === 'ans 3')
@@ -357,8 +364,16 @@ export function parseExcelOrCSVContent(content: string, filename: string = 'Impo
 }
 
 /**
+ * Parses raw Excel/CSV/TSV string content into structured AIGeneratedQuiz.
+ */
+export function parseExcelOrCSVContent(content: string, filename: string = 'Imported Quiz'): AIGeneratedQuiz {
+  const rows = parseCSVLines(content)
+  return parseSpreadsheetRows(rows, filename)
+}
+
+/**
  * Reads File (.csv, .tsv, .txt, .xlsx, .xls) and returns parsed AIGeneratedQuiz.
- * Uses SheetJS (XLSX) ArrayBuffer parsing for binary .xlsx / .xls files to avoid ZIP header corruption!
+ * Uses SheetJS (XLSX) direct sheet_to_json for binary .xlsx / .xls files to avoid CSV delimiter escaping bugs!
  */
 export async function parseExcelOrCSVFile(file: File): Promise<AIGeneratedQuiz> {
   const ext = file.name.split('.').pop()?.toLowerCase() || ''
@@ -371,8 +386,8 @@ export async function parseExcelOrCSVFile(file: File): Promise<AIGeneratedQuiz> 
       throw new Error('Excel workbook contains no valid worksheets.')
     }
     const sheet = workbook.Sheets[sheetName]
-    const csvContent = XLSX.utils.sheet_to_csv(sheet)
-    return parseExcelOrCSVContent(csvContent, file.name)
+    const jsonRows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '' })
+    return parseSpreadsheetRows(jsonRows, file.name)
   }
 
   return new Promise((resolve, reject) => {
