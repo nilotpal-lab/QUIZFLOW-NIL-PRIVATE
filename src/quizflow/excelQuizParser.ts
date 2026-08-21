@@ -1,4 +1,5 @@
 import type { AIGeneratedQuestion, AIGeneratedQuiz } from './types'
+export type { AIGeneratedQuestion, AIGeneratedQuiz } from './types'
 import * as XLSX from 'xlsx'
 
 export interface RawExcelRow {
