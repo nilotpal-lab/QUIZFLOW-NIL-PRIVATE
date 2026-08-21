@@ -132,6 +132,8 @@ export default function TeacherDashboard() {
       setTimeout(() => setToastMsg(null), 5000)
     } catch (err: any) {
       alert(`⚠️ Excel Import Failed: ${err?.message || 'Invalid spreadsheet structure.'}`)
+    } finally {
+      e.target.value = ''
     }
   }
 

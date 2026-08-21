@@ -154,6 +154,7 @@ export default function AIQuizStudio() {
       setIngestError(err?.message || 'Failed to parse Excel/CSV spreadsheet file.')
     } finally {
       setIngesting(false)
+      e.target.value = ''
     }
   }
 

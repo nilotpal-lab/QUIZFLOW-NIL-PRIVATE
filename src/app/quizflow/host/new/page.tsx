@@ -75,9 +75,11 @@ export default function HostNewPage() {
       setSavedQuizzes(updated)
       setSelectedQuiz(importedQuiz)
       setSelectedKey(`saved_${updated[0]?.id || Date.now()}`)
-      alert(`📊 Successfully imported "${importedQuiz.title}" with ${importedQuiz.questions.length} questions & 100% verified answer keys! Click '🚀 Host Now' below to launch.`)
+      alert(`📊 Successfully imported "${importedQuiz.title}" with ${importedQuiz.questions.length} questions & 100% verified answer keys! Click '🚀 Host Game' below to launch.`)
     } catch (err: any) {
       alert(`⚠️ Excel Import Failed: ${err?.message || 'Invalid spreadsheet structure.'}`)
+    } finally {
+      e.target.value = ''
     }
   }
 
